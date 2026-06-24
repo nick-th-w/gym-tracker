@@ -9,12 +9,12 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0a0a',
-        primary: '#f97316',
-        success: '#22c55e',
-        'secondary-text': '#6b7280',
-        card: '#1a1a1a',
-        border: '#2a2a2a',
+        background: '#1c1c1e',
+        primary: '#ff5500',
+        success: '#8cc63f',
+        'secondary-text': '#8e8e93',
+        card: '#2c2c2e',
+        border: '#3a3a3c',
       },
     },
   },

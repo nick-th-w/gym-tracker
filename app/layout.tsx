@@ -1,9 +1,13 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Gabarito } from 'next/font/google'
 import './globals.css'
 import BottomNav from '@/components/BottomNav'
+import Background from '@/components/Background'
 
-const inter = Inter({ subsets: ['latin'] })
+const gabarito = Gabarito({
+  subsets: ['latin'],
+  weight: ['400', '600', '700'],
+})
 
 export const metadata: Metadata = {
   title: 'Gym Tracker',
@@ -17,7 +21,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={gabarito.className}>
+        <Background />
         <main className="pb-20 min-h-screen">
           {children}
         </main>

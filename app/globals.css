@@ -7,6 +7,41 @@
 }
 
 body {
-  background-color: #0a0a0a;
+  background-color: #1c1c1e;
   color: white;
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+}
+
+.blob-orange {
+  width: 70vw;
+  height: 70vw;
+  background: rgba(255, 85, 0, 0.32);
+  top: -25vw;
+  left: -20vw;
+  animation: float-1 20s ease-in-out infinite;
+}
+
+.blob-olive {
+  width: 60vw;
+  height: 60vw;
+  background: rgba(140, 198, 63, 0.32);
+  bottom: -20vw;
+  right: -15vw;
+  animation: float-2 25s ease-in-out infinite;
+}
+
+@keyframes float-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(6vw, 8vw) scale(1.1); }
+}
+
+@keyframes float-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-6vw, -6vw) scale(1.08); }
 }
