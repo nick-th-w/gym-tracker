@@ -7,11 +7,12 @@ import { getRecommendation } from '@/lib/recommendation'
 import type { GoalType } from '@/lib/types'
 
 type SetLog = { set_number: number; weight_kg: number; reps: number; completed: boolean }
+type PriorSet = { set_number: number; weight_kg: number; reps: number }
 type Session = {
   weId: string; exerciseId: string; name: string; muscleGroups: string[]
   equipment: string; tips: string; targetSets: number; targetRepsMin: number
   targetRepsMax: number; goalType: GoalType; repsUnit: string
-  priorSets: { weight_kg: number; reps: number }[]
+  priorSets: PriorSet[]
   recWeight: number; recNote: string; sets: SetLog[]
 }
 
@@ -55,13 +56,13 @@ export default function ActiveWorkoutPage() {
 
       const weIds = Object.values(lastWEId)
       const { data: priorSetsAll } = weIds.length
-        ? await supabase.from('sets').select('workout_exercise_id, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true)
+        ? await supabase.from('sets').select('workout_exercise_id, set_number, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true).order('set_number')
         : { data: null }
 
-      const priorByWE: Record<string, { weight_kg: number; reps: number }[]> = {}
+      const priorByWE: Record<string, PriorSet[]> = {}
       for (const s of priorSetsAll ?? []) {
         if (s.weight_kg != null && s.reps != null)
-          (priorByWE[s.workout_exercise_id] ??= []).push({ weight_kg: s.weight_kg, reps: s.reps })
+          (priorByWE[s.workout_exercise_id] ??= []).push({ set_number: s.set_number, weight_kg: s.weight_kg, reps: s.reps })
       }
 
       const lastRating: Record<string, number> = {}
@@ -75,7 +76,7 @@ export default function ActiveWorkoutPage() {
         const repsMin = we.target_reps_min ?? 8
         const repsMax = we.target_reps_max ?? 10
         const priorSets = priorByWE[lastWEId[we.exercise_id]] ?? []
-        const rec = getRecommendation(priorSets, lastRating[we.exercise_id] ?? null, repsMin, repsMax, goalType)
+        const rec = getRecommendation(priorSets, lastRating[we.exercise_id] ?? null, repsMin, repsMax, goalType, ex?.name)
 
         return {
           weId: we.id, exerciseId: we.exercise_id,
@@ -114,6 +115,11 @@ export default function ActiveWorkoutPage() {
     }))
   }
 
+  function jumpTo(i: number) {
+    setIdx(i)
+    setPhase('exercise')
+  }
+
   async function submitRating(rating: number) {
     const s = sessions[idx]
     await Promise.all([
@@ -141,7 +147,7 @@ export default function ActiveWorkoutPage() {
   if (!cur) return null
 
   const allDone = cur.sets.every(s => s.completed)
-  const isBodyweight = cur.equipment === 'Bodyweight'
+  const isBodyweight = cur.equipment === 'Bodyweight' || cur.equipment === 'Resistance Band'
 
   if (phase === 'rating') {
     return (
@@ -167,11 +173,16 @@ export default function ActiveWorkoutPage() {
 
   return (
     <div className="px-4 pt-8 pb-28">
+      {/* Progress — clickable to jump */}
       <div className="flex items-center justify-between mb-6">
         <span className="text-secondary-text text-sm">{idx + 1} of {sessions.length}</span>
-        <div className="flex gap-1">
+        <div className="flex gap-1.5">
           {sessions.map((_, i) => (
-            <div key={i} className={`h-1.5 w-6 rounded-full ${i < idx ? 'bg-success' : i === idx ? 'bg-primary' : 'bg-border'}`} />
+            <button
+              key={i}
+              onClick={() => jumpTo(i)}
+              className={`h-2 w-7 rounded-full transition-colors ${i < idx ? 'bg-success' : i === idx ? 'bg-primary' : 'bg-border'}`}
+            />
           ))}
         </div>
       </div>
@@ -184,7 +195,8 @@ export default function ActiveWorkoutPage() {
       </div>
       {cur.tips && <p className="text-secondary-text text-xs italic mb-5">{cur.tips}</p>}
 
-      <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 mb-4">
+      {/* Recommendation */}
+      <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 mb-5">
         <p className="text-primary text-xs font-medium uppercase tracking-wide mb-1">Today's target</p>
         <p className="text-white font-semibold">
           {isBodyweight ? 'Bodyweight' : `${cur.recWeight}kg`}
@@ -195,48 +207,52 @@ export default function ActiveWorkoutPage() {
         <p className="text-secondary-text text-xs mt-1">{cur.recNote}</p>
       </div>
 
-      {cur.priorSets.length > 0 && (
-        <div className="bg-card border border-border rounded-xl p-3 mb-5">
-          <p className="text-secondary-text text-xs uppercase tracking-wide mb-2">Last session</p>
-          <p className="text-white text-sm">{cur.priorSets.map(s => `${s.weight_kg}kg×${s.reps}`).join(', ')}</p>
-        </div>
-      )}
-
+      {/* Sets — prior set shown inline per row */}
       <div className="flex flex-col gap-3 mb-3">
-        {cur.sets.map((set, i) => (
-          <div key={i} className={`bg-card border rounded-xl p-4 transition-colors ${set.completed ? 'border-success/40 opacity-60' : 'border-border'}`}>
-            <div className="flex items-end gap-3">
-              <span className="text-secondary-text text-sm pb-2.5 w-10 shrink-0">Set {set.set_number}</span>
-              <div className="flex-1">
-                <p className="text-secondary-text text-xs mb-1">kg</p>
-                <input
-                  type="number" inputMode="decimal"
-                  value={set.weight_kg || ''}
-                  onChange={e => updateSet(i, 'weight_kg', parseFloat(e.target.value) || 0)}
-                  disabled={set.completed || isBodyweight}
-                  className="w-full bg-border text-white text-center rounded-lg py-2.5 text-lg font-semibold disabled:opacity-40"
-                />
+        {cur.sets.map((set, i) => {
+          const prior = cur.priorSets.find(p => p.set_number === set.set_number)
+          return (
+            <div key={i} className={`bg-card border rounded-xl p-4 transition-colors ${set.completed ? 'border-success/40 opacity-60' : 'border-border'}`}>
+              <div className="flex items-end gap-3">
+                <div className="w-10 shrink-0">
+                  <span className="text-secondary-text text-sm">Set {set.set_number}</span>
+                  {prior && (
+                    <p className="text-secondary-text text-xs mt-0.5 leading-tight">
+                      {prior.weight_kg}kg×{prior.reps}
+                    </p>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <p className="text-secondary-text text-xs mb-1">kg</p>
+                  <input
+                    type="number" inputMode="decimal"
+                    value={set.weight_kg || ''}
+                    onChange={e => updateSet(i, 'weight_kg', parseFloat(e.target.value) || 0)}
+                    disabled={set.completed || isBodyweight}
+                    className="w-full bg-border text-white text-center rounded-lg py-2.5 text-lg font-semibold disabled:opacity-40"
+                  />
+                </div>
+                <span className="text-secondary-text pb-2.5">×</span>
+                <div className="flex-1">
+                  <p className="text-secondary-text text-xs mb-1">{cur.repsUnit}</p>
+                  <input
+                    type="number" inputMode="numeric"
+                    value={set.reps || ''}
+                    onChange={e => updateSet(i, 'reps', parseInt(e.target.value) || 0)}
+                    disabled={set.completed}
+                    className="w-full bg-border text-white text-center rounded-lg py-2.5 text-lg font-semibold disabled:opacity-40"
+                  />
+                </div>
+                <button
+                  onClick={() => toggleSet(i)}
+                  className={`w-10 h-10 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${set.completed ? 'bg-success border-success text-white' : 'border-border'}`}
+                >
+                  {set.completed ? '✓' : ''}
+                </button>
               </div>
-              <span className="text-secondary-text pb-2.5">×</span>
-              <div className="flex-1">
-                <p className="text-secondary-text text-xs mb-1">{cur.repsUnit}</p>
-                <input
-                  type="number" inputMode="numeric"
-                  value={set.reps || ''}
-                  onChange={e => updateSet(i, 'reps', parseInt(e.target.value) || 0)}
-                  disabled={set.completed}
-                  className="w-full bg-border text-white text-center rounded-lg py-2.5 text-lg font-semibold disabled:opacity-40"
-                />
-              </div>
-              <button
-                onClick={() => toggleSet(i)}
-                className={`w-10 h-10 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${set.completed ? 'bg-success border-success text-white' : 'border-border'}`}
-              >
-                {set.completed ? '✓' : ''}
-              </button>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       <button onClick={addSet} className="w-full border border-dashed border-border rounded-xl py-3 text-secondary-text text-sm mb-4">
