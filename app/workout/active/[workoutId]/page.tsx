@@ -181,7 +181,7 @@ export default function ActiveWorkoutPage() {
             <button
               key={i}
               onClick={() => jumpTo(i)}
-              className={`h-2 w-7 rounded-full transition-colors ${i < idx ? 'bg-success' : i === idx ? 'bg-primary' : 'bg-border'}`}
+              className={`h-3 w-8 rounded-full transition-all active:scale-90 ${i < idx ? 'bg-success' : i === idx ? 'bg-success' : 'bg-success/25'}`}
             />
           ))}
         </div>
