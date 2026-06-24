@@ -10,7 +10,7 @@ type SetLog = { set_number: number; weight_kg: number; reps: number; completed: 
 type PriorSet = { set_number: number; weight_kg: number; reps: number }
 type Session = {
   weId: string; exerciseId: string; name: string; muscleGroups: string[]
-  equipment: string; tips: string; targetSets: number; targetRepsMin: number
+  equipment: string; tips: string; videoUrl: string; targetSets: number; targetRepsMin: number
   targetRepsMax: number; goalType: GoalType; repsUnit: string
   priorSets: PriorSet[]; recWeight: number; recNote: string
   sets: SetLog[]; rated: boolean
@@ -33,7 +33,7 @@ export default function ActiveWorkoutPage() {
     async function load() {
       const { data: wes } = await supabase
         .from('workout_exercises')
-        .select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(name, muscle_groups, equipment, tips)')
+        .select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(name, muscle_groups, equipment, tips, video_url)')
         .eq('workout_id', workoutId)
         .order('order_index')
 
@@ -84,7 +84,7 @@ export default function ActiveWorkoutPage() {
         return {
           weId: we.id, exerciseId: we.exercise_id,
           name: ex?.name ?? '', muscleGroups: ex?.muscle_groups ?? [],
-          equipment: ex?.equipment ?? '', tips: ex?.tips ?? '',
+          equipment: ex?.equipment ?? '', tips: ex?.tips ?? '', videoUrl: ex?.video_url ?? '',
           targetSets: we.target_sets ?? 3, targetRepsMin: repsMin, targetRepsMax: repsMax,
           goalType, repsUnit: we.reps_unit ?? 'reps',
           priorSets, recWeight: rec.weight_kg, recNote: rec.note,
@@ -211,7 +211,41 @@ export default function ActiveWorkoutPage() {
           <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
         ))}
       </div>
-      {cur.tips && <p className="text-secondary-text text-xs italic mb-5">{cur.tips}</p>}
+      {cur.tips && (() => {
+        const [setup, technique, feel] = cur.tips.split('\n')
+        return (
+          <div className="bg-card border border-border rounded-xl p-4 mb-5 flex flex-col gap-3">
+            {setup && (
+              <div>
+                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">Setup</p>
+                <p className="text-secondary-text text-xs leading-relaxed">{setup}</p>
+              </div>
+            )}
+            {technique && (
+              <div>
+                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">Technique</p>
+                <p className="text-secondary-text text-xs leading-relaxed">{technique}</p>
+              </div>
+            )}
+            {feel && (
+              <div>
+                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">Feel it</p>
+                <p className="text-secondary-text text-xs leading-relaxed">{feel}</p>
+              </div>
+            )}
+            {cur.videoUrl && (
+              <a
+                href={cur.videoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary text-xs font-medium underline underline-offset-2 mt-1"
+              >
+                Watch technique video →
+              </a>
+            )}
+          </div>
+        )
+      })()}
 
       <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 mb-5">
         <p className="text-primary text-xs font-medium uppercase tracking-wide mb-1">Today's target</p>
