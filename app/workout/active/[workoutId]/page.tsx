@@ -25,6 +25,8 @@ export default function ActiveWorkoutPage() {
   const [phase, setPhase] = useState<'exercise' | 'rating'>('exercise')
   const [startedAt] = useState(Date.now())
   const [loading, setLoading] = useState(true)
+  const [showFinishModal, setShowFinishModal] = useState(false)
+  const [celebrating, setCelebrating] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -143,17 +145,58 @@ export default function ActiveWorkoutPage() {
     }
   }
 
+  async function confirmFinish() {
+    const s = sessions[idx]
+    const completedSets = s.sets.filter(set => set.completed)
+    if (completedSets.length > 0) {
+      await supabase.from('sets').insert(
+        completedSets.map(set => ({
+          workout_exercise_id: s.weId, set_number: set.set_number,
+          weight_kg: set.weight_kg, reps: set.reps, completed: true,
+        }))
+      )
+    }
+    await supabase.from('workouts')
+      .update({ completed: true, duration_minutes: Math.round((Date.now() - startedAt) / 60000) })
+      .eq('id', workoutId)
+    setShowFinishModal(false)
+    setCelebrating(true)
+    setTimeout(() => router.push('/'), 2500)
+  }
+
   if (loading) return <div className="px-4 pt-8"><p className="text-secondary-text">Loading workout...</p></div>
   if (!cur) return null
 
   const allDone = cur.sets.every(s => s.completed)
   const isBodyweight = cur.equipment === 'Bodyweight' || cur.equipment === 'Resistance Band'
 
+  if (celebrating) {
+    return (
+      <div className="fixed inset-0 bg-background z-50 flex flex-col items-center justify-center text-center px-6">
+        <div className="text-7xl mb-6">🎉</div>
+        <h1 className="text-4xl font-bold text-white mb-2">Great work!</h1>
+        <p className="text-secondary-text">Heading home...</p>
+      </div>
+    )
+  }
+
   if (phase === 'rating') {
     return (
-      <div className="px-4 pt-12 flex flex-col min-h-[calc(100vh-5rem)]">
-        <p className="text-secondary-text text-sm mb-2 text-center">{idx + 1} of {sessions.length}</p>
-        <h2 className="text-2xl font-bold text-white mb-1 text-center">{cur.name}</h2>
+      <div className="px-4 pt-8 flex flex-col min-h-[calc(100vh-5rem)]">
+        {/* Progress + finish — consistent across phases */}
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-secondary-text text-sm">{idx + 1} of {sessions.length}</span>
+          <div className="flex gap-1.5">
+            {sessions.map((_, i) => (
+              <button key={i} onClick={() => jumpTo(i)} className={`h-3 w-8 rounded-full transition-all active:scale-90 ${i < idx ? 'bg-success' : i === idx ? 'bg-success' : 'bg-success/25'}`} />
+            ))}
+          </div>
+        </div>
+        <button onClick={() => setShowFinishModal(true)} className="text-secondary-text text-xs text-right mb-6 underline underline-offset-2">
+          Finish workout
+        </button>
+
+        <p className="text-secondary-text text-sm mb-2 text-center">{cur.name}</p>
         <p className="text-secondary-text text-sm text-center mb-12">How hard was that?</p>
         <div className="grid grid-cols-5 gap-2">
           {(['Easy', 'OK', 'Right', 'Tough', 'Max'] as const).map((label, i) => (
@@ -167,6 +210,8 @@ export default function ActiveWorkoutPage() {
             </button>
           ))}
         </div>
+
+        {showFinishModal && <FinishModal onConfirm={confirmFinish} onCancel={() => setShowFinishModal(false)} />}
       </div>
     )
   }
@@ -174,7 +219,7 @@ export default function ActiveWorkoutPage() {
   return (
     <div className="px-4 pt-8 pb-28">
       {/* Progress — clickable to jump */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-2">
         <span className="text-secondary-text text-sm">{idx + 1} of {sessions.length}</span>
         <div className="flex gap-1.5">
           {sessions.map((_, i) => (
@@ -186,6 +231,9 @@ export default function ActiveWorkoutPage() {
           ))}
         </div>
       </div>
+      <button onClick={() => setShowFinishModal(true)} className="text-secondary-text text-xs text-right w-full mb-6 underline underline-offset-2">
+        Finish workout
+      </button>
 
       <h1 className="text-3xl font-bold text-white mb-1">{cur.name}</h1>
       <div className="flex flex-wrap gap-1.5 mb-2">
@@ -269,6 +317,34 @@ export default function ActiveWorkoutPage() {
           </button>
         </div>
       )}
+
+      {showFinishModal && <FinishModal onConfirm={confirmFinish} onCancel={() => setShowFinishModal(false)} />}
+    </div>
+  )
+}
+
+function FinishModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={onCancel}>
+      <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
+        <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
+        <h2 className="text-xl font-bold text-white mb-2">End workout?</h2>
+        <p className="text-secondary-text text-sm mb-8">Any completed sets will be saved.</p>
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={onConfirm}
+            className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
+          >
+            Yes, finish
+          </button>
+          <button
+            onClick={onCancel}
+            className="w-full bg-border active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
+          >
+            Keep going
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
