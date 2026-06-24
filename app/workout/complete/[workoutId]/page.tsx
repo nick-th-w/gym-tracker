@@ -11,7 +11,7 @@ export default async function WorkoutCompletePage({ params }: { params: { workou
   const weIds = (wes ?? []).map(we => we.id)
   const { data: allSets } = weIds.length
     ? await supabase.from('sets').select('workout_exercise_id, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true)
-    : { data: [] }
+    : { data: null }
 
   const totalVolume = (allSets ?? []).reduce((sum, s) => sum + (s.weight_kg ?? 0) * (s.reps ?? 0), 0)
 

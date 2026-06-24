@@ -49,9 +49,9 @@ export default function WorkoutPreviewPage() {
       for (const te of teRows) {
         if (!map[te.exercise_id]) {
           const mg = (te.exercises as Exercise)?.muscle_groups ?? []
-          const primary = mg[0]
+          const primary = mg[0] ?? ''
           const fallbacks = (allExs ?? [])
-            .filter(e => e.id !== te.exercise_id && (e.muscle_groups as string[])?.includes(primary))
+            .filter(e => e.id !== te.exercise_id && primary && (e.muscle_groups as string[])?.includes(primary))
             .sort((a, b) => {
               const aScore = (a.muscle_groups as string[])?.filter(m => mg.includes(m)).length ?? 0
               const bScore = (b.muscle_groups as string[])?.filter(m => mg.includes(m)).length ?? 0

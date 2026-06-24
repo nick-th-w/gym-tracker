@@ -36,8 +36,8 @@ export default async function ChooseWorkoutPage() {
               {(t.goals ?? []).map((g: string) => (
                 <span key={g} className="bg-success/15 text-success text-xs px-2.5 py-1 rounded-full font-medium">{g}</span>
               ))}
-              {/* Muscle tags — orange */}
-              {(MUSCLE_MAP[t.focus] ?? []).map(m => (
+              {/* Muscle tags — orange, skip any already shown as a goal */}
+              {(MUSCLE_MAP[t.focus] ?? []).filter(m => !(t.goals ?? []).includes(m)).map(m => (
                 <span key={m} className="bg-primary/15 text-primary text-xs px-2.5 py-1 rounded-full">{m}</span>
               ))}
             </div>

@@ -45,7 +45,7 @@ export default function ActiveWorkoutPage() {
       const pastWorkoutIds = [...new Set((pastWEs ?? []).map(we => we.workout_id))]
       const { data: doneWkts } = pastWorkoutIds.length
         ? await supabase.from('workouts').select('id').in('id', pastWorkoutIds).eq('completed', true)
-        : { data: [] }
+        : { data: null }
 
       const doneIds = new Set((doneWkts ?? []).map(w => w.id))
       const lastWEId: Record<string, string> = {}
@@ -56,7 +56,7 @@ export default function ActiveWorkoutPage() {
       const weIds = Object.values(lastWEId)
       const { data: priorSetsAll } = weIds.length
         ? await supabase.from('sets').select('workout_exercise_id, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true)
-        : { data: [] }
+        : { data: null }
 
       const priorByWE: Record<string, { weight_kg: number; reps: number }[]> = {}
       for (const s of priorSetsAll ?? []) {
