@@ -12,8 +12,8 @@ type Session = {
   weId: string; exerciseId: string; name: string; muscleGroups: string[]
   equipment: string; tips: string; targetSets: number; targetRepsMin: number
   targetRepsMax: number; goalType: GoalType; repsUnit: string
-  priorSets: PriorSet[]
-  recWeight: number; recNote: string; sets: SetLog[]
+  priorSets: PriorSet[]; recWeight: number; recNote: string
+  sets: SetLog[]; rated: boolean
 }
 
 export default function ActiveWorkoutPage() {
@@ -22,10 +22,11 @@ export default function ActiveWorkoutPage() {
 
   const [sessions, setSessions] = useState<Session[]>([])
   const [idx, setIdx] = useState(0)
-  const [phase, setPhase] = useState<'exercise' | 'rating'>('exercise')
   const [startedAt] = useState(Date.now())
   const [loading, setLoading] = useState(true)
+  const [showRatingModal, setShowRatingModal] = useState(false)
   const [showFinishModal, setShowFinishModal] = useState(false)
+  const [pendingFinish, setPendingFinish] = useState(false)
   const [celebrating, setCelebrating] = useState(false)
 
   useEffect(() => {
@@ -90,6 +91,7 @@ export default function ActiveWorkoutPage() {
           sets: Array.from({ length: we.target_sets ?? 3 }, (_, i) => ({
             set_number: i + 1, weight_kg: rec.weight_kg, reps: repsMin, completed: false,
           })),
+          rated: false,
         }
       }))
       setLoading(false)
@@ -117,45 +119,32 @@ export default function ActiveWorkoutPage() {
     }))
   }
 
-  function jumpTo(i: number) {
-    setIdx(i)
-    setPhase('exercise')
-  }
-
   async function submitRating(rating: number) {
     const s = sessions[idx]
+    const completedSets = s.sets.filter(set => set.completed)
+
     await Promise.all([
-      supabase.from('sets').insert(
-        s.sets.filter(set => set.completed).map(set => ({
-          workout_exercise_id: s.weId, set_number: set.set_number,
-          weight_kg: set.weight_kg, reps: set.reps, completed: true,
-        }))
-      ),
+      completedSets.length > 0
+        ? supabase.from('sets').insert(completedSets.map(set => ({
+            workout_exercise_id: s.weId, set_number: set.set_number,
+            weight_kg: set.weight_kg, reps: set.reps, completed: true,
+          })))
+        : Promise.resolve(),
       supabase.from('exercise_feedback').insert({ exercise_id: s.exerciseId, workout_id: workoutId, rating }),
     ])
 
-    if (idx < sessions.length - 1) {
+    setSessions(prev => prev.map((s, i) => i !== idx ? s : { ...s, rated: true }))
+    setShowRatingModal(false)
+
+    if (pendingFinish) {
+      setPendingFinish(false)
+      await finishWorkout()
+    } else if (idx < sessions.length - 1) {
       setIdx(i => i + 1)
-      setPhase('exercise')
-    } else {
-      await supabase.from('workouts')
-        .update({ completed: true, duration_minutes: Math.round((Date.now() - startedAt) / 60000) })
-        .eq('id', workoutId)
-      router.push(`/workout/complete/${workoutId}`)
     }
   }
 
-  async function confirmFinish() {
-    const s = sessions[idx]
-    const completedSets = s.sets.filter(set => set.completed)
-    if (completedSets.length > 0) {
-      await supabase.from('sets').insert(
-        completedSets.map(set => ({
-          workout_exercise_id: s.weId, set_number: set.set_number,
-          weight_kg: set.weight_kg, reps: set.reps, completed: true,
-        }))
-      )
-    }
+  async function finishWorkout() {
     await supabase.from('workouts')
       .update({ completed: true, duration_minutes: Math.round((Date.now() - startedAt) / 60000) })
       .eq('id', workoutId)
@@ -164,10 +153,19 @@ export default function ActiveWorkoutPage() {
     setTimeout(() => router.push('/'), 2500)
   }
 
+  function handleFinishTap() {
+    if (!cur.rated) {
+      setShowFinishModal(false)
+      setPendingFinish(true)
+      setShowRatingModal(true)
+    } else {
+      finishWorkout()
+    }
+  }
+
   if (loading) return <div className="px-4 pt-8"><p className="text-secondary-text">Loading workout...</p></div>
   if (!cur) return null
 
-  const allDone = cur.sets.every(s => s.completed)
   const isBodyweight = cur.equipment === 'Bodyweight' || cur.equipment === 'Resistance Band'
 
   if (celebrating) {
@@ -180,54 +178,26 @@ export default function ActiveWorkoutPage() {
     )
   }
 
-  if (phase === 'rating') {
-    return (
-      <div className="px-4 pt-8 flex flex-col min-h-[calc(100vh-5rem)]">
-        {/* Progress + finish — consistent across phases */}
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-secondary-text text-sm">{idx + 1} of {sessions.length}</span>
-          <div className="flex gap-1.5">
-            {sessions.map((_, i) => (
-              <button key={i} onClick={() => jumpTo(i)} className={`h-3 w-8 rounded-full transition-all active:scale-90 ${i < idx ? 'bg-success' : i === idx ? 'bg-success' : 'bg-success/25'}`} />
-            ))}
-          </div>
-        </div>
-        <button onClick={() => setShowFinishModal(true)} className="text-secondary-text text-xs text-right mb-6 underline underline-offset-2">
-          Finish workout
-        </button>
-
-        <p className="text-secondary-text text-sm mb-2 text-center">{cur.name}</p>
-        <p className="text-secondary-text text-sm text-center mb-12">How hard was that?</p>
-        <div className="grid grid-cols-5 gap-2">
-          {(['Easy', 'OK', 'Right', 'Tough', 'Max'] as const).map((label, i) => (
-            <button
-              key={i}
-              onClick={() => submitRating(i + 1)}
-              className="flex flex-col items-center gap-2 bg-card border border-border rounded-xl py-5 active:scale-95 transition-transform"
-            >
-              <span className="text-2xl font-bold text-white">{i + 1}</span>
-              <span className="text-secondary-text text-xs">{label}</span>
-            </button>
-          ))}
-        </div>
-
-        {showFinishModal && <FinishModal onConfirm={confirmFinish} onCancel={() => setShowFinishModal(false)} />}
-      </div>
-    )
-  }
-
   return (
-    <div className="px-4 pt-8 pb-28">
-      {/* Progress — clickable to jump */}
+    <div className="px-4 pt-8 pb-32">
+      {/* Progress circles — ✓ when rated, clickable to jump */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-secondary-text text-sm">{idx + 1} of {sessions.length}</span>
         <div className="flex gap-1.5">
-          {sessions.map((_, i) => (
+          {sessions.map((s, i) => (
             <button
               key={i}
-              onClick={() => jumpTo(i)}
-              className={`h-3 w-8 rounded-full transition-all active:scale-90 ${i < idx ? 'bg-success' : i === idx ? 'bg-success' : 'bg-success/25'}`}
-            />
+              onClick={() => { setIdx(i); setShowRatingModal(false) }}
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all active:scale-90 border-2 ${
+                s.rated
+                  ? 'bg-success border-success text-white'
+                  : i === idx
+                    ? 'border-success bg-success/20 text-success'
+                    : 'border-success/30 bg-transparent text-transparent'
+              }`}
+            >
+              {s.rated ? '✓' : ''}
+            </button>
           ))}
         </div>
       </div>
@@ -243,7 +213,6 @@ export default function ActiveWorkoutPage() {
       </div>
       {cur.tips && <p className="text-secondary-text text-xs italic mb-5">{cur.tips}</p>}
 
-      {/* Recommendation */}
       <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 mb-5">
         <p className="text-primary text-xs font-medium uppercase tracking-wide mb-1">Today's target</p>
         <p className="text-white font-semibold">
@@ -255,7 +224,6 @@ export default function ActiveWorkoutPage() {
         <p className="text-secondary-text text-xs mt-1">{cur.recNote}</p>
       </div>
 
-      {/* Sets — prior set shown inline per row */}
       <div className="flex flex-col gap-3 mb-3">
         {cur.sets.map((set, i) => {
           const prior = cur.priorSets.find(p => p.set_number === set.set_number)
@@ -265,9 +233,7 @@ export default function ActiveWorkoutPage() {
                 <div className="w-10 shrink-0">
                   <span className="text-secondary-text text-sm">Set {set.set_number}</span>
                   {prior && (
-                    <p className="text-secondary-text text-xs mt-0.5 leading-tight">
-                      {prior.weight_kg}kg×{prior.reps}
-                    </p>
+                    <p className="text-secondary-text text-xs mt-0.5 leading-tight">{prior.weight_kg}kg×{prior.reps}</p>
                   )}
                 </div>
                 <div className="flex-1">
@@ -307,44 +273,59 @@ export default function ActiveWorkoutPage() {
         + Add set
       </button>
 
-      {allDone && (
-        <div className="fixed bottom-20 left-0 right-0 px-4">
-          <button
-            onClick={() => setPhase('rating')}
-            className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
-          >
-            {idx < sessions.length - 1 ? 'Rate & Next Exercise' : 'Rate & Finish'}
-          </button>
+      {/* Complete Exercise — always visible */}
+      <div className="fixed bottom-20 left-0 right-0 px-4">
+        <button
+          onClick={() => setShowRatingModal(true)}
+          className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
+        >
+          Complete Exercise
+        </button>
+      </div>
+
+      {/* Rating modal */}
+      {showRatingModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end">
+          <div className="bg-card w-full rounded-t-3xl p-6 pb-10">
+            <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-white mb-1 text-center">{cur.name}</h2>
+            <p className="text-secondary-text text-sm text-center mb-8">How hard was that?</p>
+            <div className="grid grid-cols-5 gap-2">
+              {(['Easy', 'OK', 'Right', 'Tough', 'Max'] as const).map((label, i) => (
+                <button
+                  key={i}
+                  onClick={() => submitRating(i + 1)}
+                  className="flex flex-col items-center gap-2 bg-border rounded-xl py-4 active:scale-95 transition-transform"
+                >
+                  <span className="text-2xl font-bold text-white">{i + 1}</span>
+                  <span className="text-secondary-text text-xs">{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
-      {showFinishModal && <FinishModal onConfirm={confirmFinish} onCancel={() => setShowFinishModal(false)} />}
-    </div>
-  )
-}
-
-function FinishModal({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={onCancel}>
-      <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
-        <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
-        <h2 className="text-xl font-bold text-white mb-2">End workout?</h2>
-        <p className="text-secondary-text text-sm mb-8">Any completed sets will be saved.</p>
-        <div className="flex flex-col gap-3">
-          <button
-            onClick={onConfirm}
-            className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
-          >
-            Yes, finish
-          </button>
-          <button
-            onClick={onCancel}
-            className="w-full bg-border active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
-          >
-            Keep going
-          </button>
+      {/* Finish confirmation modal */}
+      {showFinishModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setShowFinishModal(false)}>
+          <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
+            <h2 className="text-xl font-bold text-white mb-2">End workout?</h2>
+            <p className="text-secondary-text text-sm mb-8">
+              {cur.rated ? 'Your progress will be saved.' : 'You\'ll rate the current exercise first, then finish.'}
+            </p>
+            <div className="flex flex-col gap-3">
+              <button onClick={handleFinishTap} className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all">
+                Yes, finish
+              </button>
+              <button onClick={() => setShowFinishModal(false)} className="w-full bg-border active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all">
+                Keep going
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
