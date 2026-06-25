@@ -49,7 +49,7 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
 
   const { data: exercise } = await supabase
     .from('exercises')
-    .select('id, name, muscle_groups, equipment, difficulty, tips, video_url')
+    .select('id, name, muscle_groups, equipment, difficulty, tips, video_url, gif_url')
     .eq('id', exerciseId)
     .single()
 
@@ -118,6 +118,17 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
           {exercise.difficulty === 'beginner' ? 'Beginner' : 'Intermediate'}
         </span>
       </div>
+
+      {/* Exercise image / GIF */}
+      {exercise.gif_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={exercise.gif_url}
+          alt={exercise.name}
+          loading="lazy"
+          className="w-full rounded-xl mb-4 object-cover max-h-64"
+        />
+      )}
 
       {/* Technique tips */}
       {exercise.tips && (
