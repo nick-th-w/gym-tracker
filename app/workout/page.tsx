@@ -44,6 +44,13 @@ export default async function ChooseWorkoutPage() {
             </div>
           </Link>
         ))}
+        <Link
+          href="/workout/custom"
+          className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-2xl p-4 text-secondary-text text-sm active:scale-[0.98] transition-transform hover:border-rose-500/50 hover:text-rose-400"
+        >
+          <span className="text-xl font-light">+</span>
+          <span>Build a custom workout</span>
+        </Link>
       </div>
     </div>
   )

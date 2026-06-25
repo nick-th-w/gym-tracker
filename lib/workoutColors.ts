@@ -14,9 +14,9 @@ const NAME_TO_FOCUS: Record<string, keyof typeof COLORS> = {
   'Active Recovery':'recovery',
 }
 
-const DEFAULT = { bg: 'bg-card', border: 'border-border' }
+const CUSTOM = { bg: 'bg-rose-500/20', border: 'border-rose-500/30' }
 
 export function workoutColors(key: string) {
   const focus = (NAME_TO_FOCUS[key] ?? key) as keyof typeof COLORS
-  return COLORS[focus] ?? DEFAULT
+  return COLORS[focus] ?? CUSTOM // unknown name = custom workout = rose
 }
