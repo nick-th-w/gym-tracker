@@ -11,8 +11,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  const secret = process.env.AUTH_SECRET
   const token = request.cookies.get(COOKIE)?.value
-  if (token !== process.env.AUTH_SECRET) {
+  if (!secret || !token || token !== secret) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
