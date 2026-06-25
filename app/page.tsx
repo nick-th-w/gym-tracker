@@ -186,15 +186,17 @@ export default async function TodayPage() {
   const quote = getDailyQuote()
 
   return (
-    <div className="flex flex-col px-4 pt-6 pb-6 min-h-[calc(100vh-5rem)]">
+    <div className="flex flex-col px-4 pt-5 pb-6 gap-3">
 
       {/* ── Greeting ─────────────────────────────────────────────────────── */}
-      <h1 className="text-3xl font-bold text-white mb-1">{headline}</h1>
-      <p className="text-secondary-text text-sm mb-6">{sub}</p>
+      <div>
+        <h1 className="text-3xl font-bold text-white mb-1">{headline}</h1>
+        <p className="text-secondary-text text-sm">{sub}</p>
+      </div>
 
       {/* ── Last session callout ─────────────────────────────────────────── */}
       {lastWorkout && (
-        <div className="bg-card border border-border rounded-2xl px-4 py-3 mb-3 flex items-center justify-between">
+        <div className="bg-card border border-border rounded-2xl px-4 py-3 flex items-center justify-between">
           <div className="min-w-0">
             <p className="text-secondary-text text-xs uppercase tracking-wide mb-0.5">Last session</p>
             <p className="text-white text-sm font-medium truncate">{lastWorkout.name}</p>
@@ -214,7 +216,7 @@ export default async function TodayPage() {
 
       {/* ── Muscle readiness ─────────────────────────────────────────────── */}
       {recentWEs && recentWEs.length > 0 && (
-        <div className="bg-card border border-border rounded-2xl px-4 py-3 mb-6">
+        <div className="bg-card border border-border rounded-2xl px-4 py-3">
           <p className="text-secondary-text text-xs uppercase tracking-wide mb-2.5">Muscle readiness</p>
           <div className="flex flex-wrap gap-2">
             {readiness.map(({ muscle, status }) => {
@@ -239,11 +241,11 @@ export default async function TodayPage() {
       )}
 
       {/* ── Quote of the day ─────────────────────────────────────────────── */}
-      <div className="mt-auto mb-4 px-1">
-        <p className="text-secondary-text text-xs leading-relaxed italic">
+      <div className="rounded-2xl px-5 py-5" style={{ backgroundColor: '#8aad3e' }}>
+        <p className="text-white font-bold text-2xl leading-snug">
           &ldquo;{quote.text}&rdquo;
         </p>
-        <p className="text-secondary-text/60 text-xs mt-1.5">— {quote.author}</p>
+        <p className="text-white/70 text-sm mt-3 font-medium">— {quote.author}</p>
       </div>
 
       {/* ── CTA ──────────────────────────────────────────────────────────── */}

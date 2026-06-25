@@ -34,7 +34,7 @@ export default function LoginPage() {
     <>
       <Background />
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-        <h1 className="text-4xl font-bold text-white mb-2">Nickel and Grind</h1>
+        <h1 className="text-4xl font-bold text-white mb-2">The Grind</h1>
         <p className="text-secondary-text text-sm mb-12">Sign in to continue</p>
 
         <form onSubmit={handleSubmit} className="w-full max-w-sm">

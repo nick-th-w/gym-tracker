@@ -38,12 +38,12 @@ export default async function RootLayout({
         <Background />
 
         {/* ── Slim persistent header ──────────────────────────────────────── */}
-        <header className="fixed top-0 left-0 right-0 z-50 bg-card/90 backdrop-blur-sm border-b border-border h-11 flex items-center justify-between px-4">
+        <header className="fixed top-0 left-0 right-0 z-50 h-11 flex items-center justify-between px-4" style={{ backgroundColor: '#8aad3e' }}>
           <span className="text-white text-sm font-bold tracking-tight">
-            Nickel &amp; Grind
+            {user?.user_metadata?.display_name ?? 'The Grind'}
           </span>
           {sessionCount !== null && sessionCount > 0 && (
-            <span className="text-success text-xs font-bold bg-success/10 border border-success/30 rounded-full px-3 py-1">
+            <span className="text-white text-xs font-bold bg-white/20 border border-white/30 rounded-full px-3 py-1">
               #{sessionCount}
             </span>
           )}
