@@ -2,6 +2,8 @@ import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { workoutColors } from '@/lib/workoutColors'
 
+export const revalidate = 0
+
 const MUSCLE_MAP: Record<string, string[]> = {
   full_body_a:    ['Chest', 'Back', 'Legs', 'Shoulders', 'Core'],
   full_body_b:    ['Back', 'Hamstrings', 'Chest', 'Core'],
