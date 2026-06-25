@@ -241,7 +241,7 @@ export default async function TodayPage() {
       )}
 
       {/* ── Quote of the day ─────────────────────────────────────────────── */}
-      <div className="rounded-2xl px-5 py-5" style={{ backgroundColor: '#8aad3e' }}>
+      <div className="rounded-2xl px-5 py-5" style={{ backgroundColor: '#fb923c' }}>
         <p className="text-white font-bold text-2xl leading-snug">
           &ldquo;{quote.text}&rdquo;
         </p>
