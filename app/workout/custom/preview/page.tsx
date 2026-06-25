@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import PreviewClient from './PreviewClient'
 
 export default async function CustomWorkoutPreviewPage({
@@ -6,6 +6,7 @@ export default async function CustomWorkoutPreviewPage({
 }: {
   searchParams: { exercises?: string; name?: string }
 }) {
+  const supabase = await createClient()
   const exerciseIds = (searchParams.exercises ?? '').split(',').filter(Boolean)
   const initialName = decodeURIComponent(searchParams.name ?? 'Custom Workout')
 

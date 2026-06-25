@@ -1,26 +1,47 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
 
-const COOKIE = 'gym-auth'
+export async function middleware(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request })
 
-export function middleware(request: NextRequest) {
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({ request })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
+  // Refresh the session — keeps the user logged in across tab/browser restarts
+  const { data: { user } } = await supabase.auth.getUser()
+
   const { pathname } = request.nextUrl
+  const isAuthPage = pathname === '/login' || pathname === '/register'
 
-  // Always allow the login page and auth API through
-  if (pathname === '/login' || pathname.startsWith('/api/auth')) {
-    return NextResponse.next()
-  }
-
-  const secret = process.env.AUTH_SECRET
-  const token = request.cookies.get(COOKIE)?.value
-  if (!secret || !token || token !== secret) {
+  // Not logged in and not on an auth page → redirect to login
+  if (!user && !isAuthPage) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  return NextResponse.next()
+  // Logged in but on login/register → redirect to app
+  if (user && isAuthPage) {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+
+  return supabaseResponse
 }
 
 export const config = {
-  // Run on all routes except Next.js internals and static files
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 }

@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { workoutColors } from '@/lib/workoutColors'
 
@@ -32,6 +32,7 @@ const NEXT_SESSION: Record<string, string> = {
 }
 
 export default async function ChooseWorkoutPage() {
+  const supabase = await createClient()
   const [{ data: allTemplates }, { data: lastWorkout }] = await Promise.all([
     supabase.from('workout_templates').select('id, name, description, focus, estimated_duration_minutes, goals').order('created_at'),
     supabase.from('workouts').select('name').eq('completed', true).order('date', { ascending: false }).limit(1).maybeSingle(),

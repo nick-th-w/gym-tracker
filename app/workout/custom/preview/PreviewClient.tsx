@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/client'
 
 type Exercise = { id: string; name: string; muscle_groups: string[]; equipment: string }
 
@@ -24,6 +24,7 @@ export default function PreviewClient({
 
   async function saveAsTemplate() {
     setSaving(true)
+    const supabase = createClient()
     const muscles = [...new Set(exercises.flatMap(e => e.muscle_groups))]
     const { data: tmpl } = await supabase
       .from('workout_templates')
@@ -43,9 +44,12 @@ export default function PreviewClient({
 
   async function beginWorkout() {
     setStarting(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setStarting(false); return }
     const { data: workout, error } = await supabase
       .from('workouts')
-      .insert({ name, date: new Date().toISOString().split('T')[0] })
+      .insert({ name, date: new Date().toISOString().split('T')[0], user_id: user.id })
       .select('id').single()
 
     if (error || !workout) { setStarting(false); return }

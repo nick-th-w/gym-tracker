@@ -1,5 +1,15 @@
 export type GoalType = 'strength' | 'hypertrophy' | 'accessory'
 
+export interface UserProfile {
+  user_id: string
+  display_name: string | null
+  sex: 'male' | 'female' | 'other' | null
+  body_weight_kg: number | null
+  units: 'kg' | 'lbs'
+  experience: 'beginner' | 'intermediate' | 'advanced' | null
+  primary_goal: 'strength' | 'hypertrophy' | 'fitness' | 'fat_loss' | null
+}
+
 export interface Exercise {
   id: string
   name: string

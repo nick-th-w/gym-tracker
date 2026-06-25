@@ -1,6 +1,8 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
+import { getStrengthRank, hasStandards, RANK_META } from '@/lib/strengthStandards'
+import type { UserProfile } from '@/lib/types'
 import ExerciseSelect from './ExerciseSelect'
 
 function fmtDate(dateStr: string): string {
@@ -45,8 +47,15 @@ function LineChart({ data }: { data: { label: string; value: number }[] }) {
 }
 
 export default async function ProgressPage({ searchParams }: { searchParams?: { muscle?: string; exercise?: string } }) {
+  const supabase = await createClient()
   const activeMuscle = searchParams?.muscle ?? null
   const activeExerciseId = searchParams?.exercise ?? null
+
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: profileData } = user
+    ? await supabase.from('user_profiles').select('body_weight_kg, sex').eq('user_id', user.id).maybeSingle()
+    : { data: null }
+  const profile = profileData as Pick<UserProfile, 'body_weight_kg' | 'sex'> | null
 
   const { data: allExercises } = await supabase.from('exercises').select('id, name, muscle_groups').order('name')
 
@@ -156,7 +165,20 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
       ) : activeExerciseId ? (
         /* Single exercise view */
         <div>
-          <h2 className="text-xl font-bold text-white mb-1">{activeExerciseName}</h2>
+          <div className="flex items-center gap-3 flex-wrap mb-1">
+            <h2 className="text-xl font-bold text-white">{activeExerciseName}</h2>
+            {(() => {
+              if (!activeExerciseName || !allTimeBest || !profile?.body_weight_kg) return null
+              const rank = getStrengthRank(activeExerciseName, allTimeBest.rm, profile.body_weight_kg, profile.sex ?? null)
+              if (!rank) return null
+              const m = RANK_META[rank]
+              return (
+                <span className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${m.bg} ${m.colour}`}>
+                  {m.label}
+                </span>
+              )
+            })()}
+          </div>
           <div className="flex flex-wrap gap-1 mb-4">
             {(allExercises?.find(e => e.id === activeExerciseId)?.muscle_groups as string[] ?? []).map(m => (
               <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
@@ -197,15 +219,26 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
             .sort((a, b) => (pbByExercise[b.id]?.rm ?? 0) - (pbByExercise[a.id]?.rm ?? 0))
             .map(e => {
               const pb = pbByExercise[e.id]
+              const rank = hasStandards(e.name) && profile?.body_weight_kg
+                ? getStrengthRank(e.name, pb.rm, profile.body_weight_kg, profile.sex ?? null)
+                : null
+              const rankMeta = rank ? RANK_META[rank] : null
               return (
                 <Link
                   key={e.id}
                   href={activeMuscle ? `/progress?muscle=${encodeURIComponent(activeMuscle)}&exercise=${e.id}` : `/progress?exercise=${e.id}`}
                   className="bg-card border border-border rounded-xl p-4 flex items-center justify-between active:scale-[0.98] transition-transform"
                 >
-                  <div>
-                    <p className="text-white text-sm font-medium">{e.name}</p>
-                    <div className="flex gap-1 mt-1">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-white text-sm font-medium">{e.name}</p>
+                      {rankMeta && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${rankMeta.bg} ${rankMeta.colour}`}>
+                          {rankMeta.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-1 mt-1 flex-wrap">
                       {(e.muscle_groups as string[]).map(m => (
                         <span key={m} className="bg-primary/15 text-primary text-xs px-1.5 py-0.5 rounded-full">{m}</span>
                       ))}

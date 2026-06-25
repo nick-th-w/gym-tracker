@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/client'
 import { workoutColors } from '@/lib/workoutColors'
 
 type Exercise = {
@@ -39,15 +39,25 @@ export default function WorkoutPreviewPage() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: tmpl }, { data: teRows }, { data: exs }] = await Promise.all([
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      const [{ data: tmpl }, { data: teRows }, { data: exs }, { data: favRows }] = await Promise.all([
         supabase.from('workout_templates').select('id, name, description, estimated_duration_minutes, goals, focus').eq('id', templateId).single(),
-        supabase.from('template_exercises').select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(id, name, muscle_groups, equipment, tips, difficulty, is_favourite, gif_url)').eq('template_id', templateId).order('order_index'),
-        supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty, is_favourite, gif_url').order('name'),
+        supabase.from('template_exercises').select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(id, name, muscle_groups, equipment, tips, difficulty, gif_url)').eq('template_id', templateId).order('order_index'),
+        supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty, gif_url').order('name'),
+        user
+          ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)
+          : Promise.resolve({ data: null }),
       ])
       if (!tmpl || !teRows) return
+
+      const favSet = new Set((favRows ?? []).map((f: { exercise_id: string }) => f.exercise_id))
+      const exsWithFav = (exs ?? []).map(e => ({ ...e, is_favourite: favSet.has(e.id) }))
+
       setTemplate(tmpl as Template)
       setTes(teRows as unknown as TE[])
-      setAllExs((exs ?? []) as Exercise[])
+      setAllExs(exsWithFav as Exercise[])
     }
     load()
   }, [templateId])
@@ -79,9 +89,12 @@ export default function WorkoutPreviewPage() {
   async function beginWorkout() {
     if (!template) return
     setStarting(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setStarting(false); return }
     const { data: workout, error } = await supabase
       .from('workouts')
-      .insert({ name: template.name, date: new Date().toISOString().split('T')[0] })
+      .insert({ name: template.name, date: new Date().toISOString().split('T')[0], user_id: user.id })
       .select('id').single()
     if (error || !workout) { setStarting(false); return }
     await supabase.from('workout_exercises').insert(

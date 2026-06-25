@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/client'
 
 type Exercise = { id: string; name: string; muscle_groups: string[]; equipment: string; difficulty: string; is_favourite: boolean }
 
@@ -41,8 +41,20 @@ export default function CustomWorkoutBuilderPage() {
   const [editingName, setEditingName] = useState(false)
 
   useEffect(() => {
-    supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty, is_favourite').order('name')
-      .then(({ data }) => { if (data) setExercises(data as Exercise[]) })
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      const [{ data: exs }, { data: favRows }] = await Promise.all([
+        supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty').order('name'),
+        user
+          ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)
+          : Promise.resolve({ data: null }),
+      ])
+      if (!exs) return
+      const favSet = new Set((favRows ?? []).map((f: { exercise_id: string }) => f.exercise_id))
+      setExercises(exs.map(e => ({ ...e, is_favourite: favSet.has(e.id) })) as Exercise[])
+    }
+    load()
   }, [])
 
   const allMuscles = [...new Set(exercises.flatMap(e => e.muscle_groups))].sort()

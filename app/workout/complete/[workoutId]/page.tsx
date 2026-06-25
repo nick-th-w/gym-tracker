@@ -1,9 +1,12 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 
 export default async function WorkoutCompletePage({ params }: { params: { workoutId: string } }) {
-  const { data: workout } = await supabase
-    .from('workouts').select('name, duration_minutes').eq('id', params.workoutId).single()
+  const supabase = await createClient()
+  const [{ data: workout }, { count: sessionCount }] = await Promise.all([
+    supabase.from('workouts').select('name, duration_minutes').eq('id', params.workoutId).single(),
+    supabase.from('workouts').select('id', { count: 'exact', head: true }).eq('completed', true),
+  ])
 
   const { data: wes } = await supabase
     .from('workout_exercises').select('id, exercises(name)').eq('workout_id', params.workoutId)
@@ -18,7 +21,12 @@ export default async function WorkoutCompletePage({ params }: { params: { workou
   return (
     <div className="px-4 pt-12 flex flex-col items-center text-center min-h-[calc(100vh-5rem)]">
       <h1 className="text-4xl font-bold text-white mb-1">Done.</h1>
-      <p className="text-secondary-text mb-8">{workout?.name}</p>
+      <p className="text-secondary-text">{workout?.name}</p>
+      {sessionCount && (
+        <p className="text-secondary-text text-xs mt-1 mb-8">
+          Session <span className="text-success font-semibold">#{sessionCount}</span> in the books.
+        </p>
+      )}
 
       <div className="w-full grid grid-cols-3 gap-3 mb-8">
         {[

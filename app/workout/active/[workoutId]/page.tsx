@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/client'
 import { getRecommendation } from '@/lib/recommendation'
-import type { GoalType } from '@/lib/types'
+import type { GoalType, UserProfile } from '@/lib/types'
 
 type SetLog = { set_number: number; weight_kg: number; reps: number; completed: boolean }
 type PriorSet = { set_number: number; weight_kg: number; reps: number }
@@ -21,6 +21,8 @@ export default function ActiveWorkoutPage() {
   const router = useRouter()
 
   const [sessions, setSessions] = useState<Session[]>([])
+  const [userId, setUserId] = useState<string | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
   const [idx, setIdx] = useState(0)
   const [startedAt] = useState(Date.now())
   const [loading, setLoading] = useState(true)
@@ -38,6 +40,21 @@ export default function ActiveWorkoutPage() {
 
   useEffect(() => {
     async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      setUserId(user?.id ?? null)
+
+      let loadedProfile: UserProfile | null = null
+      if (user) {
+        const { data: prof } = await supabase
+          .from('user_profiles')
+          .select('user_id, display_name, sex, body_weight_kg, units, experience, primary_goal')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        loadedProfile = prof as UserProfile | null
+        setProfile(loadedProfile)
+      }
+
       const { data: wes } = await supabase
         .from('workout_exercises')
         .select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(name, muscle_groups, equipment, tips, video_url)')
@@ -86,7 +103,7 @@ export default function ActiveWorkoutPage() {
         const repsMin = we.target_reps_min ?? 8
         const repsMax = we.target_reps_max ?? 10
         const priorSets = priorByWE[lastWEId[we.exercise_id]] ?? []
-        const rec = getRecommendation(priorSets, lastRating[we.exercise_id] ?? null, repsMin, repsMax, goalType, ex?.name)
+        const rec = getRecommendation(priorSets, lastRating[we.exercise_id] ?? null, repsMin, repsMax, goalType, ex?.name, loadedProfile)
 
         return {
           weId: we.id, exerciseId: we.exercise_id,
@@ -129,6 +146,7 @@ export default function ActiveWorkoutPage() {
   async function submitRating(rating: number) {
     const s = sessions[idx]
     const completedSets = s.sets.filter(set => set.completed)
+    const supabase = createClient()
 
     await Promise.all([
       completedSets.length > 0
@@ -137,7 +155,10 @@ export default function ActiveWorkoutPage() {
             weight_kg: set.weight_kg, reps: set.reps, completed: true,
           })))
         : Promise.resolve(),
-      supabase.from('exercise_feedback').insert({ exercise_id: s.exerciseId, workout_id: workoutId, rating }),
+      supabase.from('exercise_feedback').insert({
+        exercise_id: s.exerciseId, workout_id: workoutId, rating,
+        ...(userId ? { user_id: userId } : {}),
+      }),
     ])
 
     setSessions(prev => prev.map((s, i) => i !== idx ? s : { ...s, rated: true }))
@@ -152,6 +173,7 @@ export default function ActiveWorkoutPage() {
   }
 
   async function finishWorkout() {
+    const supabase = createClient()
     await supabase.from('workouts')
       .update({ completed: true, duration_minutes: Math.round((Date.now() - startedAt) / 60000) })
       .eq('id', workoutId)

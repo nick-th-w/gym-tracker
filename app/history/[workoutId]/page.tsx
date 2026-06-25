@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
 import { workoutColors } from '@/lib/workoutColors'
@@ -18,6 +18,7 @@ const RATING_META: Record<number, { label: string; colour: string }> = {
 }
 
 export default async function WorkoutDetailPage({ params }: { params: { workoutId: string } }) {
+  const supabase = await createClient()
   const { workoutId } = params
 
   const { data: workout } = await supabase

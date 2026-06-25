@@ -1,6 +1,8 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
+import { getStrengthRank, RANK_META } from '@/lib/strengthStandards'
+import type { UserProfile } from '@/lib/types'
 import FavouriteButton from '../FavouriteButton'
 
 function fmtDate(dateStr: string): string {
@@ -46,13 +48,25 @@ function LineChart({ data }: { data: { label: string; value: number }[] }) {
 }
 
 export default async function ExerciseDetailPage({ params }: { params: { exerciseId: string } }) {
+  const supabase = await createClient()
   const { exerciseId } = params
 
-  const { data: exercise } = await supabase
-    .from('exercises')
-    .select('id, name, muscle_groups, equipment, difficulty, tips, video_url, gif_url, is_favourite')
-    .eq('id', exerciseId)
-    .single()
+  const { data: { user } } = await supabase.auth.getUser()
+  const { data: profileData } = user
+    ? await supabase.from('user_profiles').select('body_weight_kg, sex').eq('user_id', user.id).maybeSingle()
+    : { data: null }
+  const profile = profileData as Pick<UserProfile, 'body_weight_kg' | 'sex'> | null
+
+  const [{ data: exercise }, { data: favRow }] = await Promise.all([
+    supabase.from('exercises')
+      .select('id, name, muscle_groups, equipment, difficulty, tips, video_url, gif_url')
+      .eq('id', exerciseId)
+      .single(),
+    user
+      ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id).eq('exercise_id', exerciseId).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
+  const isFavourite = !!favRow
 
   if (!exercise) return <div className="px-4 pt-8"><p className="text-secondary-text">Exercise not found.</p></div>
 
@@ -109,7 +123,7 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
         <h1 className="text-3xl font-bold text-white">{exercise.name}</h1>
-        <FavouriteButton exerciseId={exercise.id} isFavourite={!!exercise.is_favourite} />
+        <FavouriteButton exerciseId={exercise.id} isFavourite={isFavourite} />
       </div>
       <div className="flex flex-wrap items-center gap-2 mb-5">
         {(exercise.muscle_groups as string[]).map(m => (
@@ -179,13 +193,24 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
         <div>
           <p className="text-white font-semibold mb-3">Your performance</p>
 
-          {allTimeBest && (
-            <div className="bg-success/15 border border-success/30 rounded-xl p-4 mb-4">
-              <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">All-time best</p>
-              <p className="text-white font-bold text-2xl">{allTimeBest.weight}kg × {allTimeBest.reps}</p>
-              <p className="text-secondary-text text-xs mt-1">Est. 1RM: {Math.round(allTimeBest.rm)}kg</p>
-            </div>
-          )}
+          {allTimeBest && (() => {
+            const rank = profile?.body_weight_kg
+              ? getStrengthRank(exercise.name, allTimeBest.rm, profile.body_weight_kg, profile.sex ?? null)
+              : null
+            const rankMeta = rank ? RANK_META[rank] : null
+            return (
+              <div className="bg-success/15 border border-success/30 rounded-xl p-4 mb-4">
+                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">All-time best</p>
+                <p className="text-white font-bold text-2xl">{allTimeBest.weight}kg × {allTimeBest.reps}</p>
+                <p className="text-secondary-text text-xs mt-1">Est. 1RM: {Math.round(allTimeBest.rm)}kg</p>
+                {rankMeta && (
+                  <span className={`inline-block mt-2 text-xs px-2.5 py-1 rounded-full border font-semibold ${rankMeta.bg} ${rankMeta.colour}`}>
+                    {rankMeta.label}
+                  </span>
+                )}
+              </div>
+            )
+          })()}
 
           {chartData.length >= 2 && (
             <div className="bg-card border border-border rounded-xl p-4 mb-4">

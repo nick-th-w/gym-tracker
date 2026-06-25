@@ -1,4 +1,4 @@
-import { GoalType } from './types'
+import { GoalType, UserProfile } from './types'
 
 interface PriorSet {
   weight_kg: number
@@ -23,7 +23,7 @@ const INTENSITY: Record<GoalType, number> = {
   accessory: 0.65,
 }
 
-// Calibrated for: male ~38yo, 75–80kg, returning to training, targeting 75th percentile
+// Base starter weights: male, ~77.5kg, intermediate baseline
 // Dumbbell weights are per-hand
 const EXERCISE_STARTERS: Record<string, number> = {
   'Barbell Back Squat':      65,
@@ -64,8 +64,36 @@ const GOAL_FALLBACK: Record<GoalType, number> = {
   accessory: 10,
 }
 
+// Sex adjustment relative to male baseline (population median ratio)
+const SEX_FACTOR: Record<string, number> = {
+  male:   1.00,
+  female: 0.65,
+  other:  0.82,
+}
+
+// Experience adjustment relative to intermediate baseline
+const EXPERIENCE_FACTOR: Record<string, number> = {
+  beginner:     0.65,
+  intermediate: 1.00,
+  advanced:     1.30,
+}
+
+// Base calibration body weight (kg) the EXERCISE_STARTERS were written for
+const BASE_BW_KG = 77.5
+
 function roundToNearest(value: number, step: number): number {
   return Math.round(value / step) * step
+}
+
+function personaliseStarter(base: number, profile: UserProfile | null): number {
+  if (base === 0) return 0 // bodyweight exercises stay at 0
+  if (!profile) return base
+
+  const bwFactor  = profile.body_weight_kg ? profile.body_weight_kg / BASE_BW_KG : 1
+  const expFactor = profile.experience ? EXPERIENCE_FACTOR[profile.experience] : 1
+  const sexFactor = profile.sex ? SEX_FACTOR[profile.sex] : 1
+
+  return Math.max(roundToNearest(base * bwFactor * expFactor * sexFactor, 2.5), 2.5)
 }
 
 export function getRecommendation(
@@ -75,11 +103,14 @@ export function getRecommendation(
   targetRepsMax: number,
   goalType: GoalType,
   exerciseName?: string,
+  profile?: UserProfile | null,
 ): Recommendation {
   if (priorSets.length === 0) {
-    const starterWeight = exerciseName !== undefined && exerciseName in EXERCISE_STARTERS
+    const base = exerciseName !== undefined && exerciseName in EXERCISE_STARTERS
       ? EXERCISE_STARTERS[exerciseName]
       : GOAL_FALLBACK[goalType]
+
+    const starterWeight = personaliseStarter(base, profile ?? null)
 
     return {
       weight_kg: starterWeight,

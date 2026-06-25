@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import SearchInput from './SearchInput'
@@ -31,11 +31,19 @@ export default async function ExercisesPage({
   const activeCompletion = searchParams?.completion ?? null
   const showFavourites   = searchParams?.favourite === 'true'
 
-  // Parallel: exercises + completed workouts for completion count
-  const [{ data: exercises }, { data: completedWks }] = await Promise.all([
-    supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty, is_favourite').order('name'),
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // Parallel: exercises + completed workouts + user's favourites
+  const [{ data: exercises }, { data: completedWks }, { data: favRows }] = await Promise.all([
+    supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty').order('name'),
     supabase.from('workouts').select('id').eq('completed', true),
+    user
+      ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)
+      : Promise.resolve({ data: null }),
   ])
+
+  const favouriteIds = new Set((favRows ?? []).map((f: { exercise_id: string }) => f.exercise_id))
 
   // Completion counts per exercise
   const cWkIds = (completedWks ?? []).map(w => w.id)
@@ -66,7 +74,7 @@ export default async function ExercisesPage({
   const allEquipment = [...new Set((exercises ?? []).map(e => e.equipment))].sort()
 
   const filtered = (exercises ?? []).filter(e => {
-    if (showFavourites   && !e.is_favourite) return false
+    if (showFavourites   && !favouriteIds.has(e.id)) return false
     if (activeMuscle     && !(e.muscle_groups as string[]).includes(activeMuscle)) return false
     if (activeEquipment  && e.equipment !== activeEquipment) return false
     if (activeDifficulty && e.difficulty !== activeDifficulty) return false
@@ -179,7 +187,7 @@ export default async function ExercisesPage({
               </Link>
               {/* Favourite button sits outside the Link */}
               <div className="absolute top-3 right-3">
-                <FavouriteButton exerciseId={e.id} isFavourite={!!e.is_favourite} size="sm" />
+                <FavouriteButton exerciseId={e.id} isFavourite={!!favouriteIds.has(e.id)} size="sm" />
               </div>
             </div>
           )

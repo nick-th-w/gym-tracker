@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
 import { workoutColors } from '@/lib/workoutColors'
@@ -117,6 +117,7 @@ export default async function HistoryPage({
 }: {
   searchParams?: { type?: string; range?: string }
 }) {
+  const supabase = await createClient()
   const activeFilter = searchParams?.type ?? null
   const activeRange  = searchParams?.range ?? '90' // default 90 days
 
