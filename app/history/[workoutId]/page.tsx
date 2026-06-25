@@ -137,10 +137,10 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
           const pbStatus = getPBStatus(we.exercise_id)
 
           return (
-            <div key={we.id} className="flex gap-2">
+            <div key={we.id} className="grid grid-cols-12 gap-2">
 
-              {/* Card 1: Exercise info */}
-              <div className="bg-card border border-border rounded-xl p-3 flex-1 min-w-0">
+              {/* Card 1: Exercise info — 6/12 */}
+              <div className="col-span-6 bg-card border border-border rounded-xl p-3 min-w-0">
                 <p className="text-white font-semibold text-sm leading-tight mb-1">{ex?.name}</p>
                 <div className="flex flex-wrap gap-1 mb-2">
                   {(ex?.muscle_groups ?? []).map((m: string) => (
@@ -156,8 +156,8 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
                 )}
               </div>
 
-              {/* Card 2: Rating */}
-              <div className="bg-card border border-border rounded-xl p-2 w-16 shrink-0 flex flex-col items-center justify-center text-center">
+              {/* Card 2: Rating — 3/12 */}
+              <div className="col-span-3 bg-card border border-border rounded-xl p-2 flex flex-col items-center justify-center text-center">
                 {ratingMeta ? (
                   <>
                     <p className={`text-xs font-bold leading-tight ${ratingMeta.colour}`}>{ratingMeta.label}</p>
@@ -168,8 +168,8 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
                 )}
               </div>
 
-              {/* Card 3: vs PB */}
-              <div className="bg-card border border-border rounded-xl p-2 w-[90px] shrink-0 flex flex-col items-center justify-center text-center gap-1">
+              {/* Card 3: vs PB — 3/12 */}
+              <div className="col-span-3 bg-card border border-border rounded-xl p-2 flex flex-col items-center justify-center text-center gap-1">
                 {pbStatus === null && <p className="text-secondary-text text-xs">—</p>}
                 {pbStatus === 'new' && (
                   <span className="bg-primary text-white text-xs px-2 py-0.5 rounded-full font-bold">NEW</span>
