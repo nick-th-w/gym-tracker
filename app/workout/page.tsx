@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import { workoutColors } from '@/lib/workoutColors'
 
 const MUSCLE_MAP: Record<string, string[]> = {
   full_body_a: ['Chest', 'Back', 'Legs', 'Shoulders', 'Core'],
@@ -24,7 +25,7 @@ export default async function ChooseWorkoutPage() {
           <Link
             key={t.id}
             href={`/workout/${t.id}`}
-            className="bg-card border border-border rounded-2xl p-4 active:scale-[0.98] transition-transform"
+            className={`${workoutColors(t.focus).bg} ${workoutColors(t.focus).border} border rounded-2xl p-4 active:scale-[0.98] transition-transform`}
           >
             <div className="flex items-start justify-between mb-1">
               <h2 className="text-white font-semibold text-lg">{t.name}</h2>

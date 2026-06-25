@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { workoutColors } from '@/lib/workoutColors'
 
 type Exercise = { id: string; name: string; muscle_groups: string[]; equipment: string; tips: string }
 type TE = {
@@ -10,7 +11,7 @@ type TE = {
   target_sets: number; target_reps_min: number; target_reps_max: number
   goal_type: string; reps_unit: string; exercises: Exercise
 }
-type Template = { id: string; name: string; description: string; estimated_duration_minutes: number; goals: string[] }
+type Template = { id: string; name: string; description: string; estimated_duration_minutes: number; goals: string[]; focus?: string }
 
 export default function WorkoutPreviewPage() {
   const { templateId } = useParams<{ templateId: string }>()
@@ -26,7 +27,7 @@ export default function WorkoutPreviewPage() {
   useEffect(() => {
     async function load() {
       const [{ data: tmpl }, { data: teRows }, { data: allExs }] = await Promise.all([
-        supabase.from('workout_templates').select('id, name, description, estimated_duration_minutes, goals').eq('id', templateId).single(),
+        supabase.from('workout_templates').select('id, name, description, estimated_duration_minutes, goals, focus').eq('id', templateId).single(),
         supabase.from('template_exercises').select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(id, name, muscle_groups, equipment, tips)').eq('template_id', templateId).order('order_index'),
         supabase.from('exercises').select('id, name, muscle_groups, equipment, tips'),
       ])
@@ -95,21 +96,24 @@ export default function WorkoutPreviewPage() {
 
   if (!template) return <div className="px-4 pt-8"><p className="text-secondary-text">Loading...</p></div>
 
+  const colors = workoutColors(template.focus ?? template.name)
+
   return (
     <div className="px-4 pt-8 pb-32">
       <button onClick={() => router.back()} className="text-secondary-text text-sm mb-4 block">← Back</button>
 
-      <div className="flex items-start justify-between mb-1">
-        <h1 className="text-3xl font-bold text-white">{template.name}</h1>
-        <span className="text-secondary-text text-sm mt-1 shrink-0 ml-2">~{template.estimated_duration_minutes} min</span>
-      </div>
-      <p className="text-secondary-text text-sm mb-4 leading-relaxed">{template.description}</p>
-
-      {/* Goal tags — green */}
-      <div className="flex flex-wrap gap-1.5 mb-4">
-        {(template.goals ?? []).map(g => (
-          <span key={g} className="bg-success/15 text-success text-xs px-2.5 py-1 rounded-full font-medium">{g}</span>
-        ))}
+      {/* Coloured header card */}
+      <div className={`${colors.bg} ${colors.border} border rounded-2xl p-4 mb-6`}>
+        <div className="flex items-start justify-between mb-1">
+          <h1 className="text-3xl font-bold text-white">{template.name}</h1>
+          <span className="text-secondary-text text-sm mt-1 shrink-0 ml-2">~{template.estimated_duration_minutes} min</span>
+        </div>
+        <p className="text-secondary-text text-sm mb-3 leading-relaxed">{template.description}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(template.goals ?? []).map(g => (
+            <span key={g} className="bg-success/15 text-success text-xs px-2.5 py-1 rounded-full font-medium">{g}</span>
+          ))}
+        </div>
       </div>
 
       {/* Muscle coverage — orange */}

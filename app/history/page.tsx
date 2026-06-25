@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
+import { workoutColors } from '@/lib/workoutColors'
 
 function parseDateParts(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -127,8 +128,8 @@ export default async function HistoryPage({ searchParams }: { searchParams?: { t
                 <p className="text-secondary-text text-xs">{weekday}</p>
               </div>
 
-              {/* Main card — olive green */}
-              <div className="bg-success/20 border border-success/30 rounded-2xl p-4 flex-1 min-w-0">
+              {/* Main card — session colour */}
+              <div className={`${workoutColors(w.name).bg} ${workoutColors(w.name).border} border rounded-2xl p-4 flex-1 min-w-0`}>
                 <p className="text-white font-semibold text-base leading-tight mb-1">{w.name}</p>
                 <p className="text-secondary-text text-xs mb-2">
                   {completedCount} exercise{completedCount !== 1 ? 's' : ''} completed

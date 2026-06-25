@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
+import { workoutColors } from '@/lib/workoutColors'
 import DeleteWorkoutButton from './DeleteWorkoutButton'
 
 function formatDate(dateStr: string): string {
@@ -110,8 +111,11 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
     <div className="px-4 pt-8 pb-24">
       <Link href="/history" className="text-secondary-text text-sm mb-4 block">← History</Link>
 
-      <h1 className="text-3xl font-bold text-white mb-1">{workout.name}</h1>
-      <p className="text-secondary-text text-sm mb-6">{formatDate(workout.date)}</p>
+      {/* Coloured session header */}
+      <div className={`${workoutColors(workout.name).bg} ${workoutColors(workout.name).border} border rounded-2xl p-4 mb-6`}>
+        <h1 className="text-3xl font-bold text-white mb-1">{workout.name}</h1>
+        <p className="text-secondary-text text-sm">{formatDate(workout.date)}</p>
+      </div>
 
       {/* Summary stats — sets, exercises, rating */}
       <div className="grid grid-cols-3 gap-3 mb-6">
