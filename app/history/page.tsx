@@ -6,15 +6,11 @@ import { workoutColors } from '@/lib/workoutColors'
 function parseDateParts(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number)
   const date = new Date(y, m - 1, d)
-  return { day: d, month: date.toLocaleDateString('en-GB', { month: 'short' }), weekday: date.toLocaleDateString('en-GB', { weekday: 'short' }) }
-}
-
-function getMondayKey(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const date = new Date(y, m - 1, d)
-  const offset = date.getDay() === 0 ? -6 : 1 - date.getDay()
-  date.setDate(date.getDate() + offset)
-  return date.toISOString().split('T')[0]
+  return {
+    day: d,
+    month: date.toLocaleDateString('en-GB', { month: 'short' }),
+    weekday: date.toLocaleDateString('en-GB', { weekday: 'short' }),
+  }
 }
 
 function fmtShort(dateStr: string): string {
@@ -22,37 +18,98 @@ function fmtShort(dateStr: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
-function FrequencyChart({ data }: { data: { label: string; count: number }[] }) {
-  const W = 340, H = 100
-  const P = { t: 8, r: 8, b: 22, l: 20 }
-  const cW = W - P.l - P.r, cH = H - P.t - P.b
-  const maxC = Math.max(...data.map(d => d.count), 1)
-  const bW = (cW / data.length) - 4
+function getDayKey(offsetFromToday: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - offsetFromToday)
+  return d.toISOString().split('T')[0]
+}
+
+// ─── Dual-axis chart: daily bars (green) + cumulative line (orange) ──────────
+function WorkoutChart({ data }: { data: { date: string; count: number; cumulative: number }[] }) {
+  if (!data.some(d => d.count > 0)) return (
+    <div className="h-28 flex items-center justify-center">
+      <p className="text-secondary-text text-sm">No workouts in this period</p>
+    </div>
+  )
+
+  const W = 340, H = 130
+  const P = { t: 16, r: 36, b: 22, l: 24 }
+  const cW = W - P.l - P.r
+  const cH = H - P.t - P.b
+  const n = data.length
+  const slotW = cW / n
+  const bW = Math.max(1.5, slotW - 0.8)
+
+  const maxCount = Math.max(...data.map(d => d.count), 1)
+  const maxCum = Math.max(...data.map(d => d.cumulative), 1)
+
+  const bX = (i: number) => P.l + i * slotW + (slotW - bW) / 2
+  const barH = (c: number) => (c / maxCount) * cH
+  const lineY = (cum: number) => P.t + cH - (cum / maxCum) * cH
+
+  const linePath = data
+    .map((d, i) => `${i === 0 ? 'M' : 'L'}${bX(i) + bW / 2},${lineY(d.cumulative)}`)
+    .join(' ')
+
+  // Show ~5 evenly spaced x-axis labels
+  const labelStep = Math.max(1, Math.floor(n / 5))
+  const labelIdxs = Array.from({ length: Math.ceil(n / labelStep) }, (_, i) => i * labelStep)
+    .filter(i => i < n)
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {data.map((d, i) => {
-        const bH = (d.count / maxC) * cH
-        const bX = P.l + i * (cW / data.length) + 2
-        const bY = P.t + cH - bH
-        return (
-          <g key={i}>
-            <rect x={bX} y={bY} width={bW} height={bH || 1} fill={d.count > 0 ? '#8cc63f' : '#3a3a3c'} rx="2" />
-            {(i === 0 || i === data.length - 1 || i === Math.floor(data.length / 2)) && (
-              <text x={bX + bW / 2} y={H - 4} textAnchor="middle" fill="#8e8e93" fontSize="8">{d.label}</text>
-            )}
-          </g>
+      {/* Horizontal guide line at half cumulative */}
+      <line x1={P.l} y1={lineY(maxCum / 2)} x2={W - P.r} y2={lineY(maxCum / 2)} stroke="#525254" strokeWidth="0.4" strokeDasharray="3,3" />
+
+      {/* Daily bars */}
+      {data.map((d, i) => (
+        d.count > 0 && (
+          <rect
+            key={i}
+            x={bX(i)}
+            y={P.t + cH - barH(d.count)}
+            width={bW}
+            height={barH(d.count)}
+            fill="#8cc63f"
+            fillOpacity="0.85"
+            rx="0.5"
+          />
         )
-      })}
+      ))}
+
+      {/* Cumulative line */}
+      <path d={linePath} fill="none" stroke="#ff5500" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Line end dot */}
+      <circle
+        cx={bX(n - 1) + bW / 2}
+        cy={lineY(data[n - 1].cumulative)}
+        r="2.5"
+        fill="#ff5500"
+      />
+
+      {/* Left Y axis — daily count */}
+      <text x={P.l - 3} y={P.t + cH} textAnchor="end" fill="#8cc63f" fontSize="8">0</text>
+      <text x={P.l - 3} y={P.t + 4} textAnchor="end" fill="#8cc63f" fontSize="8">{maxCount}</text>
+
+      {/* Right Y axis — cumulative */}
+      <text x={W - P.r + 4} y={P.t + cH} textAnchor="start" fill="#ff5500" fontSize="8">0</text>
+      <text x={W - P.r + 4} y={P.t + 4} textAnchor="start" fill="#ff5500" fontSize="8">{maxCum}</text>
+
+      {/* X axis labels */}
+      {labelIdxs.map(i => (
+        <text key={i} x={bX(i) + bW / 2} y={H - 3} textAnchor="middle" fill="#8e8e93" fontSize="8">
+          {fmtShort(data[i].date)}
+        </text>
+      ))}
     </svg>
   )
 }
 
 const RANGES = [
-  { label: 'All time', value: 'all' },
-  { label: '90 days',  value: '90'  },
-  { label: '30 days',  value: '30'  },
   { label: '7 days',   value: '7'   },
+  { label: '30 days',  value: '30'  },
+  { label: '90 days',  value: '90'  },
+  { label: 'All time', value: 'all' },
 ]
 
 export default async function HistoryPage({
@@ -61,7 +118,7 @@ export default async function HistoryPage({
   searchParams?: { type?: string; range?: string }
 }) {
   const activeFilter = searchParams?.type ?? null
-  const activeRange = searchParams?.range ?? 'all'
+  const activeRange  = searchParams?.range ?? '90' // default 90 days
 
   const { data: workouts } = await supabase
     .from('workouts').select('id, name, date, duration_minutes').eq('completed', true).order('date', { ascending: false })
@@ -75,8 +132,8 @@ export default async function HistoryPage({
     )
   }
 
-  const workoutIds = workouts.map(w => w.id)
   const workoutTypes = [...new Set(workouts.map(w => w.name))]
+  const workoutIds = workouts.map(w => w.id)
 
   const [{ data: wes }, { data: allRatings }] = await Promise.all([
     supabase.from('workout_exercises').select('id, workout_id, exercise_id, exercises(muscle_groups)').in('workout_id', workoutIds),
@@ -109,7 +166,7 @@ export default async function HistoryPage({
   const ratingByWorkout: Record<string, number> = {}
   for (const r of allRatings ?? []) ratingByWorkout[r.workout_id] = (ratingByWorkout[r.workout_id] ?? 0) + r.rating
 
-  // PB/NEW (sorted by date ascending)
+  // PB/NEW (processed in date order)
   const sortedByDate = [...workouts].sort((a, b) => a.date.localeCompare(b.date))
   const runningBest: Record<string, number> = {}
   const pbNewByWorkout: Record<string, { newCount: number; pbCount: number }> = {}
@@ -128,47 +185,43 @@ export default async function HistoryPage({
     pbNewByWorkout[w.id] = { newCount, pbCount }
   }
 
-  // ── Monthly summary (current month, all workouts) ─────────────────────────
-  const currentMonth = new Date().toISOString().substring(0, 7)
-  const thisMonthWorkouts = workouts.filter(w => w.date.startsWith(currentMonth))
-  const thisMonthExercises = thisMonthWorkouts.reduce((sum, w) => sum + (completedCountByWorkout[w.id] ?? 0), 0)
+  // ── Apply filters ─────────────────────────────────────────────────────────
+  const cutoffDate = activeRange !== 'all' ? getDayKey(parseInt(activeRange) - 1) : null
 
-  // ── Time range filter ─────────────────────────────────────────────────────
-  const cutoffDate = activeRange !== 'all'
-    ? new Date(Date.now() - parseInt(activeRange) * 86400000).toISOString().split('T')[0]
-    : null
-
-  // ── Frequency chart data (weeks in selected range) ────────────────────────
-  const rangeWeeks = activeRange === '7' ? 1 : activeRange === '30' ? 5 : activeRange === '90' ? 13 : 12
-  const workoutsByWeek: Record<string, number> = {}
-  for (const w of workouts) {
-    if (activeFilter && w.name !== activeFilter) continue
-    if (cutoffDate && w.date < cutoffDate) continue
-    const week = getMondayKey(w.date)
-    workoutsByWeek[week] = (workoutsByWeek[week] ?? 0) + 1
-  }
-
-  const chartWeeks = Array.from({ length: rangeWeeks }, (_, i) => {
-    const d = new Date()
-    d.setDate(d.getDate() - (rangeWeeks - 1 - i) * 7)
-    const offset = d.getDay() === 0 ? -6 : 1 - d.getDay()
-    d.setDate(d.getDate() + offset)
-    const key = d.toISOString().split('T')[0]
-    return { label: fmtShort(key).split(' ')[0], count: workoutsByWeek[key] ?? 0 }
-  })
-
-  // ── Filtered workout list ─────────────────────────────────────────────────
   const filtered = workouts.filter(w => {
     if (activeFilter && w.name !== activeFilter) return false
     if (cutoffDate && w.date < cutoffDate) return false
     return true
   })
 
-  // Build range-aware href helper
+  // ── Stats for filtered period ─────────────────────────────────────────────
+  const periodWorkouts = filtered.length
+  const periodExercises = filtered.reduce((sum, w) => sum + (completedCountByWorkout[w.id] ?? 0), 0)
+
+  // ── Daily chart data (90 days default) ───────────────────────────────────
+  const chartDays = activeRange === 'all' ? 90 : parseInt(activeRange)
+
+  const workoutsByDay: Record<string, number> = {}
+  for (const w of workouts) {
+    if (activeFilter && w.name !== activeFilter) continue
+    workoutsByDay[w.date] = (workoutsByDay[w.date] ?? 0) + 1
+  }
+
+  let cumulative = 0
+  const chartData = Array.from({ length: chartDays }, (_, i) => {
+    const date = getDayKey(chartDays - 1 - i)
+    const count = workoutsByDay[date] ?? 0
+    cumulative += count
+    return { date, count, cumulative }
+  })
+
+  // Helper to build href preserving both filter params
   function href(params: Record<string, string | null>) {
     const p = new URLSearchParams()
-    if (params.type ?? activeFilter) p.set('type', params.type ?? activeFilter ?? '')
-    if (params.range ?? activeRange !== 'all') p.set('range', params.range ?? activeRange)
+    const type = params.type !== undefined ? params.type : activeFilter
+    const range = params.range !== undefined ? params.range : activeRange
+    if (type) p.set('type', type)
+    if (range && range !== '90') p.set('range', range)
     const str = p.toString()
     return `/history${str ? `?${str}` : ''}`
   }
@@ -177,29 +230,8 @@ export default async function HistoryPage({
     <div className="px-4 pt-8 pb-6">
       <h1 className="text-3xl font-bold text-white mb-4">History</h1>
 
-      {/* ── Monthly summary callouts ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <div className="bg-card border border-border rounded-xl p-4 text-center">
-          <p className="text-secondary-text text-xs mb-1">This month</p>
-          <p className="text-white font-bold text-2xl">{thisMonthWorkouts.length}</p>
-          <p className="text-secondary-text text-xs mt-0.5">workouts</p>
-        </div>
-        <div className="bg-card border border-border rounded-xl p-4 text-center">
-          <p className="text-secondary-text text-xs mb-1">This month</p>
-          <p className="text-white font-bold text-2xl">{thisMonthExercises}</p>
-          <p className="text-secondary-text text-xs mt-0.5">exercises done</p>
-        </div>
-      </div>
-
-      {/* ── Frequency chart ───────────────────────────────────────────────── */}
-      <div className="bg-card border border-border rounded-xl p-4 mb-5">
-        <p className="text-secondary-text text-xs uppercase tracking-wide mb-3">
-          Workout frequency {activeFilter ? `— ${activeFilter}` : ''}
-        </p>
-        <FrequencyChart data={chartWeeks} />
-      </div>
-
-      {/* ── Workout type filter ───────────────────────────────────────────── */}
+      {/* ── Filters at top — affect everything below ────────────────────── */}
+      {/* Workout type */}
       <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
         <Link href={href({ type: null })} className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${!activeFilter ? 'bg-success text-white' : 'bg-card text-secondary-text border border-border'}`}>
           All
@@ -211,13 +243,39 @@ export default async function HistoryPage({
         ))}
       </div>
 
-      {/* ── Time range filter ─────────────────────────────────────────────── */}
+      {/* Time range */}
       <div className="flex gap-2 overflow-x-auto pb-2 mb-5 scrollbar-hide">
         {RANGES.map(r => (
           <Link key={r.value} href={href({ range: r.value })} className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${activeRange === r.value ? 'bg-success text-white' : 'bg-card text-secondary-text border border-border'}`}>
             {r.label}
           </Link>
         ))}
+      </div>
+
+      {/* ── Period summary callouts (filtered) ───────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-card border border-border rounded-xl p-4 text-center">
+          <p className="text-secondary-text text-xs mb-1">Workouts</p>
+          <p className="text-white font-bold text-2xl">{periodWorkouts}</p>
+          <p className="text-secondary-text text-xs mt-0.5">in this period</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl p-4 text-center">
+          <p className="text-secondary-text text-xs mb-1">Exercises done</p>
+          <p className="text-white font-bold text-2xl">{periodExercises}</p>
+          <p className="text-secondary-text text-xs mt-0.5">in this period</p>
+        </div>
+      </div>
+
+      {/* ── Chart — daily bars + cumulative line (filtered) ─────────────── */}
+      <div className="bg-card border border-border rounded-xl p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-secondary-text text-xs uppercase tracking-wide">Workout frequency</p>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1 text-xs text-success"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-success/80"></span> Daily</span>
+            <span className="flex items-center gap-1 text-xs text-primary"><span className="inline-block w-3 h-0.5 bg-primary"></span> Cumulative</span>
+          </div>
+        </div>
+        <WorkoutChart data={chartData} />
       </div>
 
       {/* ── Workout cards ─────────────────────────────────────────────────── */}
