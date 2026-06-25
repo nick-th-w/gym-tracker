@@ -13,7 +13,12 @@ const config: Config = {
     'bg-amber-500/20',  'border-amber-500/30',
     'bg-red-500/20',    'border-red-500/30',
     'bg-purple-500/20', 'border-purple-500/30',
-    'bg-rose-500/20',   'border-rose-500/30',
+    'bg-rose-500/20',    'border-rose-500/30',
+    'bg-teal-500/20',    'border-teal-500/30',
+    'bg-fuchsia-500/20', 'border-fuchsia-500/30',
+    'bg-sky-500/20',     'border-sky-500/30',
+    'bg-lime-500/20',    'border-lime-500/30',
+    'bg-slate-400/20',   'border-slate-400/30',
   ],
   theme: {
     extend: {

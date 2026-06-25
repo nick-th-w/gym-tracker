@@ -28,6 +28,13 @@ export default function ActiveWorkoutPage() {
   const [showFinishModal, setShowFinishModal] = useState(false)
   const [pendingFinish, setPendingFinish] = useState(false)
   const [celebrating, setCelebrating] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [tipsOpen, setTipsOpen] = useState(true)
+
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [startedAt])
 
   useEffect(() => {
     async function load() {
@@ -182,7 +189,12 @@ export default function ActiveWorkoutPage() {
     <div className="px-4 pt-8 pb-32">
       {/* Progress circles — ✓ when rated, clickable to jump */}
       <div className="flex items-center justify-between mb-2">
-        <span className="text-secondary-text text-sm">{idx + 1} of {sessions.length}</span>
+        <span className="text-secondary-text text-sm">
+          {idx + 1} of {sessions.length}
+          <span className="ml-2 text-secondary-text">
+            {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+          </span>
+        </span>
         <div className="flex gap-1.5">
           {sessions.map((s, i) => (
             <button
@@ -242,6 +254,29 @@ export default function ActiveWorkoutPage() {
               >
                 Watch technique video →
               </a>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* Sticky collapsible tips */}
+      {cur.tips && (() => {
+        const [setup, technique, feel] = cur.tips.split('\n')
+        return (
+          <div className="sticky top-0 z-10 mb-4">
+            <button
+              onClick={() => setTipsOpen(o => !o)}
+              className="w-full flex items-center justify-between bg-card/95 backdrop-blur border border-border rounded-xl px-4 py-2.5"
+            >
+              <span className="text-success text-xs font-semibold uppercase tracking-wide">Technique tips</span>
+              <span className="text-secondary-text text-xs">{tipsOpen ? '▲ hide' : '▼ show'}</span>
+            </button>
+            {tipsOpen && (
+              <div className="bg-card/95 backdrop-blur border border-t-0 border-border rounded-b-xl px-4 pb-3 pt-2 flex flex-col gap-2">
+                {setup && <p className="text-secondary-text text-xs leading-relaxed"><span className="text-success font-semibold">Setup: </span>{setup}</p>}
+                {technique && <p className="text-secondary-text text-xs leading-relaxed"><span className="text-success font-semibold">Technique: </span>{technique}</p>}
+                {feel && <p className="text-secondary-text text-xs leading-relaxed"><span className="text-success font-semibold">Feel it: </span>{feel}</p>}
+              </div>
             )}
           </div>
         )

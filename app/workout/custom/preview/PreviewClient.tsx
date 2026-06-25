@@ -17,8 +17,29 @@ export default function PreviewClient({
   const [name, setName] = useState(initialName)
   const [editingName, setEditingName] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   const allMuscles = [...new Set(exercises.flatMap(e => e.muscle_groups))]
+
+  async function saveAsTemplate() {
+    setSaving(true)
+    const muscles = [...new Set(exercises.flatMap(e => e.muscle_groups))]
+    const { data: tmpl } = await supabase
+      .from('workout_templates')
+      .insert({ name, description: `Custom workout · ${exercises.length} exercises`, focus: 'custom_saved', estimated_duration_minutes: exercises.length * 7, goals: muscles.slice(0, 3) })
+      .select('id').single()
+    if (tmpl) {
+      await supabase.from('template_exercises').insert(
+        exercises.map((ex, i) => ({
+          template_id: tmpl.id, exercise_id: ex.id, order_index: i + 1,
+          target_sets: 3, target_reps_min: 8, target_reps_max: 10, goal_type: 'hypertrophy', reps_unit: 'reps',
+        }))
+      )
+    }
+    setSaving(false)
+    setSaved(true)
+  }
 
   async function beginWorkout() {
     setStarting(true)
@@ -97,13 +118,20 @@ export default function PreviewClient({
         ))}
       </div>
 
-      <div className="fixed bottom-20 left-0 right-0 px-4">
+      <div className="fixed bottom-20 left-0 right-0 px-4 flex flex-col gap-2">
         <button
           onClick={beginWorkout}
           disabled={starting}
           className="w-full bg-rose-500 active:scale-95 disabled:opacity-60 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
         >
           {starting ? 'Starting...' : 'Begin Workout'}
+        </button>
+        <button
+          onClick={saveAsTemplate}
+          disabled={saving || saved}
+          className="w-full bg-card border border-border active:scale-95 disabled:opacity-60 text-white font-medium py-3 rounded-2xl text-sm transition-all"
+        >
+          {saved ? 'Saved to your templates ✓' : saving ? 'Saving...' : 'Save as template'}
         </button>
       </div>
     </div>

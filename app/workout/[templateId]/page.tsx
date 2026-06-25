@@ -5,7 +5,10 @@ import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { workoutColors } from '@/lib/workoutColors'
 
-type Exercise = { id: string; name: string; muscle_groups: string[]; equipment: string; tips: string }
+type Exercise = {
+  id: string; name: string; muscle_groups: string[]; equipment: string
+  tips: string; difficulty: string; is_favourite: boolean; gif_url: string | null
+}
 type TE = {
   id: string; exercise_id: string; order_index: number
   target_sets: number; target_reps_min: number; target_reps_max: number
@@ -13,59 +16,65 @@ type TE = {
 }
 type Template = { id: string; name: string; description: string; estimated_duration_minutes: number; goals: string[]; focus?: string }
 
+const DIFF_COLOUR: Record<string, string> = {
+  beginner:     'text-success',
+  intermediate: 'text-primary',
+  difficult:    'text-red-400',
+}
+
 export default function WorkoutPreviewPage() {
   const { templateId } = useParams<{ templateId: string }>()
   const router = useRouter()
 
   const [template, setTemplate] = useState<Template | null>(null)
   const [tes, setTes] = useState<TE[]>([])
-  const [altMap, setAltMap] = useState<Record<string, Exercise[]>>({})
+  const [allExs, setAllExs] = useState<Exercise[]>([])
   const [swaps, setSwaps] = useState<Record<string, Exercise>>({})
   const [swapOpen, setSwapOpen] = useState<string | null>(null)
+  const [swapSearch, setSwapSearch] = useState('')
+  const [swapDifficulty, setSwapDifficulty] = useState<string | null>(null)
+  const [swapFavOnly, setSwapFavOnly] = useState(false)
+  const [swapPreview, setSwapPreview] = useState<Exercise | null>(null)
   const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     async function load() {
-      const [{ data: tmpl }, { data: teRows }, { data: allExs }] = await Promise.all([
+      const [{ data: tmpl }, { data: teRows }, { data: exs }] = await Promise.all([
         supabase.from('workout_templates').select('id, name, description, estimated_duration_minutes, goals, focus').eq('id', templateId).single(),
-        supabase.from('template_exercises').select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(id, name, muscle_groups, equipment, tips)').eq('template_id', templateId).order('order_index'),
-        supabase.from('exercises').select('id, name, muscle_groups, equipment, tips'),
+        supabase.from('template_exercises').select('id, exercise_id, order_index, target_sets, target_reps_min, target_reps_max, goal_type, reps_unit, exercises(id, name, muscle_groups, equipment, tips, difficulty, is_favourite, gif_url)').eq('template_id', templateId).order('order_index'),
+        supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty, is_favourite, gif_url').order('name'),
       ])
       if (!tmpl || !teRows) return
       setTemplate(tmpl as Template)
       setTes(teRows as unknown as TE[])
-
-      const ids = teRows.map(te => te.exercise_id)
-      const { data: links } = await supabase.from('exercise_alternatives').select('exercise_id, alternative_exercise_id').in('exercise_id', ids)
-
-      // Build altMap from defined alternatives
-      const map: Record<string, Exercise[]> = {}
-      for (const l of links ?? []) {
-        const ex = allExs?.find(e => e.id === l.alternative_exercise_id)
-        if (ex) (map[l.exercise_id] ??= []).push(ex as Exercise)
-      }
-
-      // Fallback: for exercises with no defined alternatives, require same primary muscle
-      // then sort by total overlap so the closest matches surface first
-      for (const te of teRows) {
-        if (!map[te.exercise_id]) {
-          const mg = (te.exercises as Exercise)?.muscle_groups ?? []
-          const primary = mg[0] ?? ''
-          const fallbacks = (allExs ?? [])
-            .filter(e => e.id !== te.exercise_id && primary && (e.muscle_groups as string[])?.includes(primary))
-            .sort((a, b) => {
-              const aScore = (a.muscle_groups as string[])?.filter(m => mg.includes(m)).length ?? 0
-              const bScore = (b.muscle_groups as string[])?.filter(m => mg.includes(m)).length ?? 0
-              return bScore - aScore
-            })
-            .slice(0, 4)
-          if (fallbacks.length) map[te.exercise_id] = fallbacks as Exercise[]
-        }
-      }
-      setAltMap(map)
+      setAllExs((exs ?? []) as Exercise[])
     }
     load()
   }, [templateId])
+
+  // Reset swap filters when opening a new slot
+  function openSwap(teId: string) {
+    setSwapOpen(swapOpen === teId ? null : teId)
+    setSwapSearch('')
+    setSwapDifficulty(null)
+    setSwapFavOnly(false)
+    setSwapPreview(null)
+  }
+
+  function getSwapOptions(te: TE): Exercise[] {
+    const currentEx = swaps[te.id] ?? te.exercises
+    const primaryMuscle = (currentEx?.muscle_groups ?? [])[0]
+    return allExs
+      .filter(e => {
+        if (e.id === (swaps[te.id]?.id ?? te.exercise_id)) return false
+        if (primaryMuscle && !(e.muscle_groups).includes(primaryMuscle)) return false
+        if (swapFavOnly && !e.is_favourite) return false
+        if (swapDifficulty && e.difficulty !== swapDifficulty) return false
+        if (swapSearch && !e.name.toLowerCase().includes(swapSearch.toLowerCase())) return false
+        return true
+      })
+      .slice(0, 25)
+  }
 
   async function beginWorkout() {
     if (!template) return
@@ -74,9 +83,7 @@ export default function WorkoutPreviewPage() {
       .from('workouts')
       .insert({ name: template.name, date: new Date().toISOString().split('T')[0] })
       .select('id').single()
-
     if (error || !workout) { setStarting(false); return }
-
     await supabase.from('workout_exercises').insert(
       tes.map(te => ({
         workout_id: workout.id,
@@ -102,7 +109,6 @@ export default function WorkoutPreviewPage() {
     <div className="px-4 pt-8 pb-32">
       <button onClick={() => router.back()} className="text-secondary-text text-sm mb-4 block">← Back</button>
 
-      {/* Coloured header card */}
       <div className={`${colors.bg} ${colors.border} border rounded-2xl p-4 mb-6`}>
         <div className="flex items-start justify-between mb-1">
           <h1 className="text-3xl font-bold text-white">{template.name}</h1>
@@ -116,7 +122,6 @@ export default function WorkoutPreviewPage() {
         </div>
       </div>
 
-      {/* Muscle coverage — orange */}
       <div className="bg-card border border-border rounded-xl p-3 mb-6">
         <p className="text-secondary-text text-xs uppercase tracking-wide mb-2">Muscles worked</p>
         <div className="flex flex-wrap gap-1.5">
@@ -130,10 +135,10 @@ export default function WorkoutPreviewPage() {
         {tes.map(te => {
           const ex = swaps[te.id] ?? te.exercises
           const isOpen = swapOpen === te.id
-          const alts = altMap[te.exercise_id] ?? []
           const repRange = te.target_reps_min === te.target_reps_max
             ? `${te.target_reps_min} ${te.reps_unit}`
             : `${te.target_reps_min}–${te.target_reps_max} ${te.reps_unit}`
+          const swapOptions = isOpen ? getSwapOptions(te) : []
 
           return (
             <div key={te.id} className="bg-card border border-border rounded-xl overflow-hidden">
@@ -142,48 +147,107 @@ export default function WorkoutPreviewPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-white font-semibold">{ex?.name}</p>
                     <p className="text-secondary-text text-xs mt-0.5">{te.target_sets} sets · {repRange} · {ex?.equipment}</p>
-                    {/* Muscle tags — orange */}
                     <div className="flex flex-wrap gap-1 mt-2">
                       {(ex?.muscle_groups ?? []).map(m => (
                         <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
                       ))}
                     </div>
                   </div>
-                  <button
-                    onClick={() => setSwapOpen(isOpen ? null : te.id)}
-                    className="ml-3 text-primary text-xs font-medium shrink-0"
-                  >
+                  <button onClick={() => openSwap(te.id)} className="ml-3 text-primary text-xs font-medium shrink-0">
                     {isOpen ? 'Close' : 'Swap'}
                   </button>
                 </div>
               </div>
 
               {isOpen && (
-                <div className="border-t border-border px-4 pb-3 pt-2">
-                  <p className="text-secondary-text text-xs mb-2">Choose alternative</p>
-                  <div className="flex flex-col gap-2">
+                <div className="border-t border-border px-4 pb-4 pt-3">
+                  {/* Swap filters */}
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="search"
+                      placeholder="Search exercises..."
+                      value={swapSearch}
+                      onChange={e => { setSwapSearch(e.target.value); setSwapPreview(null) }}
+                      className="flex-1 bg-border text-white text-xs rounded-lg px-3 py-2 placeholder:text-secondary-text"
+                    />
+                  </div>
+                  <div className="flex gap-1.5 flex-wrap mb-3">
                     <button
-                      onClick={() => { setSwaps(s => { const n = { ...s }; delete n[te.id]; return n }); setSwapOpen(null) }}
+                      onClick={() => setSwapFavOnly(f => !f)}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${swapFavOnly ? 'bg-primary text-white' : 'bg-border text-secondary-text'}`}
+                    >
+                      <svg viewBox="0 0 24 24" className={`w-3 h-3 ${swapFavOnly ? 'fill-white' : 'fill-none stroke-current'}`} strokeWidth="2">
+                        <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+                      </svg>
+                      Favourites
+                    </button>
+                    {['beginner', 'intermediate', 'difficult'].map(d => (
+                      <button
+                        key={d}
+                        onClick={() => { setSwapDifficulty(swapDifficulty === d ? null : d); setSwapPreview(null) }}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${swapDifficulty === d ? 'bg-success text-white' : 'bg-border text-secondary-text'}`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Preview panel */}
+                  {swapPreview && (
+                    <div className="bg-background border border-border rounded-xl p-3 mb-3">
+                      {swapPreview.gif_url && (() => {
+                        const f1 = swapPreview.gif_url as string
+                        const f2 = f1.replace(/\/0\.(\w+)$/, '/1.$1')
+                        return (
+                          <div className="relative w-full rounded-lg mb-3 overflow-hidden bg-card">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={f1} alt={swapPreview.name} className="w-full h-auto block" style={{ animation: 'show-a 2.4s ease-in-out infinite' }} />
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={f2} alt={swapPreview.name} className="absolute inset-0 w-full h-full object-contain" style={{ animation: 'show-b 2.4s ease-in-out infinite' }} />
+                          </div>
+                        )
+                      })()}
+                      <p className="text-white font-semibold text-sm mb-1">{swapPreview.name}</p>
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {swapPreview.muscle_groups.map(m => (
+                          <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
+                        ))}
+                        <span className={`text-xs font-medium capitalize ${DIFF_COLOUR[swapPreview.difficulty] ?? ''}`}>· {swapPreview.difficulty}</span>
+                      </div>
+                      <button
+                        onClick={() => { setSwaps(s => ({ ...s, [te.id]: swapPreview })); setSwapOpen(null); setSwapPreview(null) }}
+                        className="w-full bg-success text-white text-sm font-semibold py-2.5 rounded-xl"
+                      >
+                        Swap to {swapPreview.name}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Exercise list */}
+                  <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+                    {/* Current / default */}
+                    <button
+                      onClick={() => { setSwaps(s => { const n = { ...s }; delete n[te.id]; return n }); setSwapOpen(null); setSwapPreview(null) }}
                       className={`text-left px-3 py-2.5 rounded-lg text-sm ${!swaps[te.id] ? 'bg-primary/20 text-primary' : 'bg-border text-white'}`}
                     >
-                      {te.exercises?.name} <span className="text-secondary-text text-xs">(default)</span>
+                      {te.exercises?.name} <span className="text-secondary-text text-xs">(current)</span>
                     </button>
-                    {alts.map(alt => (
+                    {swapOptions.map(opt => (
                       <button
-                        key={alt.id}
-                        onClick={() => { setSwaps(s => ({ ...s, [te.id]: alt })); setSwapOpen(null) }}
-                        className={`text-left px-3 py-2.5 rounded-lg text-sm ${swaps[te.id]?.id === alt.id ? 'bg-primary/20 text-primary' : 'bg-border text-white'}`}
+                        key={opt.id}
+                        onClick={() => setSwapPreview(swapPreview?.id === opt.id ? null : opt)}
+                        className={`text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${swapPreview?.id === opt.id ? 'bg-success/20 border border-success/40 text-white' : 'bg-border text-white'}`}
                       >
-                        <span className="block">{alt.name} <span className="text-secondary-text text-xs">· {alt.equipment}</span></span>
-                        <span className="flex flex-wrap gap-1 mt-1">
-                          {(alt.muscle_groups ?? []).map(m => (
-                            <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
-                          ))}
+                        <span className="block">{opt.name}</span>
+                        <span className="flex gap-1.5 mt-1 flex-wrap">
+                          {opt.muscle_groups.map(m => <span key={m} className="bg-primary/15 text-primary text-xs px-1.5 py-0.5 rounded-full">{m}</span>)}
+                          <span className={`text-xs capitalize ${DIFF_COLOUR[opt.difficulty] ?? ''}`}>· {opt.difficulty}</span>
+                          {opt.is_favourite && <span className="text-primary text-xs">♥</span>}
                         </span>
                       </button>
                     ))}
-                    {alts.length === 0 && (
-                      <p className="text-secondary-text text-xs px-3">No alternatives available</p>
+                    {swapOptions.length === 0 && (
+                      <p className="text-secondary-text text-xs px-3 py-2">No exercises match your filters.</p>
                     )}
                   </div>
                 </div>
