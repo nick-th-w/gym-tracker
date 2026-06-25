@@ -35,7 +35,10 @@ export default async function ChooseWorkoutPage() {
     supabase.from('workouts').select('name').eq('completed', true).order('date', { ascending: false }).limit(1).maybeSingle(),
   ])
 
-  const recommendedName = lastWorkout ? (NEXT_SESSION[lastWorkout.name] ?? null) : 'Full Body A'
+  // Fall back to Full Body A if no history or last workout name not in the map
+  const recommendedName = lastWorkout
+    ? (NEXT_SESSION[lastWorkout.name] ?? 'Full Body A')
+    : 'Full Body A'
 
   const standardTemplates = (allTemplates ?? []).filter(t => t.focus !== 'custom_saved')
   const savedTemplates    = (allTemplates ?? []).filter(t => t.focus === 'custom_saved')
