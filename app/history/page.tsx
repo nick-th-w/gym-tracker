@@ -1,17 +1,15 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import { estimate1RM } from '@/lib/recommendation'
 
-function formatDate(dateStr: string): string {
-  const today = new Date().toISOString().split('T')[0]
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
-  if (dateStr === today) return 'Today'
-  if (dateStr === yesterday) return 'Yesterday'
+function parseDateParts(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-}
-
-function formatVolume(kg: number): string {
-  return kg >= 1000 ? `${(kg / 1000).toFixed(1)}t` : `${Math.round(kg)}kg`
+  const date = new Date(y, m - 1, d)
+  return {
+    day: d,
+    month: date.toLocaleDateString('en-GB', { month: 'short' }),
+    weekday: date.toLocaleDateString('en-GB', { weekday: 'short' }),
+  }
 }
 
 export default async function HistoryPage() {
@@ -31,10 +29,11 @@ export default async function HistoryPage() {
   }
 
   const workoutIds = workouts.map(w => w.id)
-  const { data: wes } = await supabase
-    .from('workout_exercises')
-    .select('id, workout_id, exercises(muscle_groups)')
-    .in('workout_id', workoutIds)
+
+  const [{ data: wes }, { data: allRatings }] = await Promise.all([
+    supabase.from('workout_exercises').select('id, workout_id, exercise_id, exercises(muscle_groups)').in('workout_id', workoutIds),
+    supabase.from('exercise_feedback').select('workout_id, rating').in('workout_id', workoutIds),
+  ])
 
   const weIds = (wes ?? []).map(we => we.id)
   const { data: allSets } = weIds.length
@@ -42,21 +41,45 @@ export default async function HistoryPage() {
     : { data: null }
 
   // Build lookup maps
-  const weToWorkout: Record<string, string> = {}
-  const countByWorkout: Record<string, number> = {}
+  const wesByWorkout: Record<string, typeof wes> = {}
   const musclesByWorkout: Record<string, string[]> = {}
+  const countByWorkout: Record<string, number> = {}
 
   for (const we of wes ?? []) {
-    weToWorkout[we.id] = we.workout_id
+    ;(wesByWorkout[we.workout_id] ??= []).push(we)
     countByWorkout[we.workout_id] = (countByWorkout[we.workout_id] ?? 0) + 1
     const muscles: string[] = (we.exercises as any)?.muscle_groups ?? []
     musclesByWorkout[we.workout_id] = [...new Set([...(musclesByWorkout[we.workout_id] ?? []), ...muscles])]
   }
 
-  const volumeByWorkout: Record<string, number> = {}
+  const setsByWE: Record<string, { weight_kg: number; reps: number }[]> = {}
   for (const s of allSets ?? []) {
-    const wid = weToWorkout[s.workout_exercise_id]
-    if (wid) volumeByWorkout[wid] = (volumeByWorkout[wid] ?? 0) + (s.weight_kg ?? 0) * (s.reps ?? 0)
+    if (s.weight_kg != null && s.reps != null)
+      (setsByWE[s.workout_exercise_id] ??= []).push({ weight_kg: s.weight_kg, reps: s.reps })
+  }
+
+  const ratingByWorkout: Record<string, number> = {}
+  for (const r of allRatings ?? []) {
+    ratingByWorkout[r.workout_id] = (ratingByWorkout[r.workout_id] ?? 0) + r.rating
+  }
+
+  // Compute PB/NEW per workout (process in date order)
+  const sortedByDate = [...workouts].sort((a, b) => a.date.localeCompare(b.date))
+  const runningBest: Record<string, number> = {}
+  const pbNewByWorkout: Record<string, { newCount: number; pbCount: number }> = {}
+
+  for (const w of sortedByDate) {
+    let newCount = 0, pbCount = 0
+    for (const we of wesByWorkout[w.id] ?? []) {
+      const weSets = setsByWE[we.id] ?? []
+      if (!weSets.length) continue
+      const cur1RM = Math.max(...weSets.map(s => estimate1RM(s.weight_kg, s.reps)))
+      const prev = runningBest[we.exercise_id]
+      if (prev === undefined) newCount++
+      else if (cur1RM > prev) pbCount++
+      runningBest[we.exercise_id] = Math.max(runningBest[we.exercise_id] ?? 0, cur1RM)
+    }
+    pbNewByWorkout[w.id] = { newCount, pbCount }
   }
 
   return (
@@ -66,34 +89,51 @@ export default async function HistoryPage() {
 
       <div className="flex flex-col gap-3">
         {workouts.map(w => {
+          const { day, month, weekday } = parseDateParts(w.date)
           const muscles = musclesByWorkout[w.id] ?? []
-          const volume = volumeByWorkout[w.id] ?? 0
           const exCount = countByWorkout[w.id] ?? 0
+          const totalRating = ratingByWorkout[w.id] ?? 0
+          const { newCount, pbCount } = pbNewByWorkout[w.id] ?? { newCount: 0, pbCount: 0 }
 
           return (
-            <Link
-              key={w.id}
-              href={`/history/${w.id}`}
-              className="bg-card border border-border rounded-2xl p-4 active:scale-[0.98] transition-transform"
-            >
-              <div className="flex items-start justify-between mb-1">
-                <h2 className="text-white font-semibold text-lg">{w.name}</h2>
-                <span className="text-secondary-text text-sm shrink-0 ml-2">{formatDate(w.date)}</span>
+            <Link key={w.id} href={`/history/${w.id}`} className="flex gap-3 active:scale-[0.98] transition-transform">
+
+              {/* Date card — small square */}
+              <div className="bg-card border border-border rounded-2xl p-3 w-[72px] shrink-0 flex flex-col items-center justify-center text-center">
+                <p className="text-white font-bold text-2xl leading-none">{day}</p>
+                <p className="text-primary text-xs font-medium mt-1">{month}</p>
+                <p className="text-secondary-text text-xs">{weekday}</p>
               </div>
 
-              <div className="flex gap-3 mb-3">
-                <span className="text-secondary-text text-xs">{w.duration_minutes ?? 0} min</span>
-                <span className="text-secondary-text text-xs">·</span>
-                <span className="text-secondary-text text-xs">{exCount} exercises</span>
-                <span className="text-secondary-text text-xs">·</span>
-                <span className="text-secondary-text text-xs">{formatVolume(volume)}</span>
+              {/* Info card — wider */}
+              <div className="bg-card border border-border rounded-2xl p-4 flex-1 min-w-0">
+                <p className="text-white font-semibold text-base leading-tight mb-1">{w.name}</p>
+                <p className="text-secondary-text text-xs mb-2">
+                  {exCount} exercises{totalRating > 0 ? ` · Rating: ${totalRating}` : ''}
+                </p>
+
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {muscles.map(m => (
+                    <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
+                  ))}
+                </div>
+
+                {(newCount > 0 || pbCount > 0) && (
+                  <div className="flex gap-2 mt-2">
+                    {newCount > 0 && (
+                      <span className="bg-primary text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
+                        NEW ×{newCount}
+                      </span>
+                    )}
+                    {pbCount > 0 && (
+                      <span className="bg-success text-white text-xs px-2.5 py-0.5 rounded-full font-bold">
+                        PB ×{pbCount}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="flex flex-wrap gap-1.5">
-                {muscles.map(m => (
-                  <span key={m} className="bg-primary/15 text-primary text-xs px-2.5 py-1 rounded-full">{m}</span>
-                ))}
-              </div>
             </Link>
           )
         })}
