@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
+import FavouriteButton from '../FavouriteButton'
 
 function fmtDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -49,7 +50,7 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
 
   const { data: exercise } = await supabase
     .from('exercises')
-    .select('id, name, muscle_groups, equipment, difficulty, tips, video_url, gif_url')
+    .select('id, name, muscle_groups, equipment, difficulty, tips, video_url, gif_url, is_favourite')
     .eq('id', exerciseId)
     .single()
 
@@ -106,16 +107,21 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
       <Link href="/exercises" className="text-secondary-text text-sm mb-4 block">← Exercises</Link>
 
       {/* Header */}
-      <h1 className="text-3xl font-bold text-white mb-2">{exercise.name}</h1>
+      <div className="flex items-start justify-between mb-2">
+        <h1 className="text-3xl font-bold text-white">{exercise.name}</h1>
+        <FavouriteButton exerciseId={exercise.id} isFavourite={!!exercise.is_favourite} />
+      </div>
       <div className="flex flex-wrap items-center gap-2 mb-5">
         {(exercise.muscle_groups as string[]).map(m => (
           <span key={m} className="bg-primary/15 text-primary text-xs px-2.5 py-1 rounded-full">{m}</span>
         ))}
         <span className="text-secondary-text text-xs">{exercise.equipment}</span>
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-          exercise.difficulty === 'beginner' ? 'bg-success/15 text-success' : 'bg-primary/15 text-primary'
+          exercise.difficulty === 'beginner' ? 'bg-success/15 text-success' :
+          exercise.difficulty === 'difficult' ? 'bg-red-500/15 text-red-400' :
+          'bg-primary/15 text-primary'
         }`}>
-          {exercise.difficulty === 'beginner' ? 'Beginner' : 'Intermediate'}
+          {exercise.difficulty === 'beginner' ? 'Beginner' : exercise.difficulty === 'difficult' ? 'Difficult' : 'Intermediate'}
         </span>
       </div>
 
