@@ -36,6 +36,17 @@ body {
   animation: float-2 25s ease-in-out infinite;
 }
 
+@keyframes show-a {
+  0%, 45%  { opacity: 1; }
+  50%, 95% { opacity: 0; }
+  100%     { opacity: 1; }
+}
+@keyframes show-b {
+  0%, 45%  { opacity: 0; }
+  50%, 95% { opacity: 1; }
+  100%     { opacity: 0; }
+}
+
 @keyframes float-1 {
   0%, 100% { transform: translate(0, 0) scale(1); }
   50% { transform: translate(6vw, 8vw) scale(1.1); }

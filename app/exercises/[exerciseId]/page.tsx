@@ -125,16 +125,23 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
         </span>
       </div>
 
-      {/* Exercise image / GIF */}
-      {exercise.gif_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={exercise.gif_url}
-          alt={exercise.name}
-          loading="lazy"
-          className="w-full rounded-xl mb-4 object-cover max-h-64"
-        />
-      )}
+      {/* Exercise animation — crossfades between start and end frame */}
+      {exercise.gif_url && (() => {
+        const frame1 = exercise.gif_url as string
+        const frame2 = frame1.replace(/\/0\.(\w+)$/, '/1.$1')
+        return (
+          <div className="relative w-full rounded-xl mb-4 overflow-hidden bg-card" style={{ height: '220px' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={frame1} alt={exercise.name} loading="lazy"
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ animation: 'show-a 2.4s ease-in-out infinite' }} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={frame2} alt={exercise.name} loading="lazy"
+              className="absolute inset-0 w-full h-full object-cover"
+              style={{ animation: 'show-b 2.4s ease-in-out infinite' }} />
+          </div>
+        )
+      })()}
 
       {/* Technique tips */}
       {exercise.tips && (
