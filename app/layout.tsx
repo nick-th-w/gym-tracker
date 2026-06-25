@@ -10,7 +10,7 @@ const gabarito = Gabarito({
 })
 
 export const metadata: Metadata = {
-  title: 'Gym Tracker',
+  title: 'Nickel and Grind',
   description: 'Track your workouts',
 }
 
