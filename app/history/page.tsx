@@ -88,16 +88,16 @@ function WorkoutChart({ data }: { data: { date: string; count: number; cumulativ
       />
 
       {/* Left Y axis — daily count */}
-      <text x={P.l - 3} y={P.t + cH} textAnchor="end" fill="#8cc63f" fontSize="8">0</text>
-      <text x={P.l - 3} y={P.t + 4} textAnchor="end" fill="#8cc63f" fontSize="8">{maxCount}</text>
+      <text x={P.l - 3} y={P.t + cH} textAnchor="end" fill="#8cc63f" fontSize="6.5">0</text>
+      <text x={P.l - 3} y={P.t + 4} textAnchor="end" fill="#8cc63f" fontSize="6.5">{maxCount}</text>
 
       {/* Right Y axis — cumulative */}
-      <text x={W - P.r + 4} y={P.t + cH} textAnchor="start" fill="#ff5500" fontSize="8">0</text>
-      <text x={W - P.r + 4} y={P.t + 4} textAnchor="start" fill="#ff5500" fontSize="8">{maxCum}</text>
+      <text x={W - P.r + 4} y={P.t + cH} textAnchor="start" fill="#ff5500" fontSize="6.5">0</text>
+      <text x={W - P.r + 4} y={P.t + 4} textAnchor="start" fill="#ff5500" fontSize="6.5">{maxCum}</text>
 
       {/* X axis labels */}
       {labelIdxs.map(i => (
-        <text key={i} x={bX(i) + bW / 2} y={H - 3} textAnchor="middle" fill="#8e8e93" fontSize="8">
+        <text key={i} x={bX(i) + bW / 2} y={H - 3} textAnchor="middle" fill="#8e8e93" fontSize="6.5">
           {fmtShort(data[i].date)}
         </text>
       ))}
