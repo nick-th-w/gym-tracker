@@ -1,8 +1,26 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAnonClient } from '@supabase/supabase-js'
+import { unstable_cache } from 'next/cache'
 import Link from 'next/link'
 import { Suspense } from 'react'
 import SearchInput from './SearchInput'
 import FavouriteButton from './FavouriteButton'
+
+const getCachedExercises = unstable_cache(
+  async () => {
+    const supabase = createAnonClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    const { data } = await supabase
+      .from('exercises')
+      .select('id, name, muscle_groups, equipment, difficulty')
+      .order('name')
+    return data ?? []
+  },
+  ['exercises-list'],
+  { revalidate: 3600 }
+)
 
 const DIFFICULTY_LABEL: Record<string, string> = {
   beginner:     'Beginner',
@@ -34,9 +52,9 @@ export default async function ExercisesPage({
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Parallel: exercises + completed workouts + user's favourites
-  const [{ data: exercises }, { data: completedWks }, { data: favRows }] = await Promise.all([
-    supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty').order('name'),
+  // exercises served from 1-hour cache; user-specific data fetched fresh
+  const [exercises, { data: completedWks }, { data: favRows }] = await Promise.all([
+    getCachedExercises(),
     supabase.from('workouts').select('id').eq('completed', true),
     user
       ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)

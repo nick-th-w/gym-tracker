@@ -1,8 +1,24 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAnonClient } from '@supabase/supabase-js'
+import { unstable_cache } from 'next/cache'
 import Link from 'next/link'
 import { workoutColors } from '@/lib/workoutColors'
 
-export const revalidate = 0
+const getCachedTemplates = unstable_cache(
+  async () => {
+    const supabase = createAnonClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    const { data } = await supabase
+      .from('workout_templates')
+      .select('id, name, description, focus, estimated_duration_minutes, goals')
+      .order('created_at')
+    return data ?? []
+  },
+  ['workout-templates'],
+  { revalidate: 3600 }
+)
 
 const MUSCLE_MAP: Record<string, string[]> = {
   full_body_a:    ['Chest', 'Back', 'Legs', 'Shoulders', 'Core'],
@@ -33,8 +49,9 @@ const NEXT_SESSION: Record<string, string> = {
 
 export default async function ChooseWorkoutPage() {
   const supabase = await createClient()
-  const [{ data: allTemplates }, { data: lastWorkout }] = await Promise.all([
-    supabase.from('workout_templates').select('id, name, description, focus, estimated_duration_minutes, goals').order('created_at'),
+  // templates from cache; last workout fetched fresh (user-specific)
+  const [allTemplates, { data: lastWorkout }] = await Promise.all([
+    getCachedTemplates(),
     supabase.from('workouts').select('name').eq('completed', true).order('date', { ascending: false }).limit(1).maybeSingle(),
   ])
 
