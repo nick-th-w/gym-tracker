@@ -68,23 +68,42 @@ export default async function TodayPage() {
   const { data: { user } } = await supabase.auth.getUser()
   const displayName = user?.user_metadata?.display_name as string | undefined
 
-  // Server-side hour in UTC — client-side hook would be ideal but this avoids
-  // a client component just for a greeting
   const hourUTC = new Date().getUTCHours()
-  // Shift to a rough AEST (UTC+10) — good enough for greeting tone
   const hourLocal = (hourUTC + 10) % 24
   const { headline, sub } = getGreeting(displayName, hourLocal)
+  const quote = getDailyQuote()
 
-  // Fetch in parallel: session count, last workout, recent muscle groups
+  // ── Fast path: check session count first ────────────────────────────────────
+  const { count: sessionCount } = await supabase
+    .from('workouts')
+    .select('id', { count: 'exact', head: true })
+    .eq('completed', true)
+
+  // New user — skip all history queries, render immediately
+  if (!sessionCount) {
+    return (
+      <div className="flex flex-col px-4 pt-5 pb-6 gap-3">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-1">{headline}</h1>
+          <p className="text-secondary-text text-sm">{sub}</p>
+        </div>
+        <div className="rounded-2xl px-5 py-5" style={{ backgroundColor: '#fb923c' }}>
+          <p className="text-white font-bold text-2xl leading-snug">&ldquo;{quote.text}&rdquo;</p>
+          <p className="text-white/70 text-sm mt-3 font-medium">— {quote.author}</p>
+        </div>
+        <Link href="/workout"
+          className="w-full bg-success hover:opacity-90 active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all duration-150 block text-center">
+          Start Workout
+        </Link>
+      </div>
+    )
+  }
+
+  // ── Returning user — fetch history data ─────────────────────────────────────
   const [
-    { count: sessionCount },
     { data: lastWorkout },
     { data: recentWorkouts },
   ] = await Promise.all([
-    supabase
-      .from('workouts')
-      .select('id', { count: 'exact', head: true })
-      .eq('completed', true),
     supabase
       .from('workouts')
       .select('id, name, date, duration_minutes')
@@ -182,8 +201,6 @@ export default async function TodayPage() {
       : daysSince === 1
         ? '1 day rest'
         : `${daysSince} days rest`
-
-  const quote = getDailyQuote()
 
   return (
     <div className="flex flex-col px-4 pt-5 pb-6 gap-3">
