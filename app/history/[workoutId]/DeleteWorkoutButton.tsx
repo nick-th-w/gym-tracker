@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/client'
 
 export default function DeleteWorkoutButton({ workoutId }: { workoutId: string }) {
   const router = useRouter()
@@ -11,6 +11,7 @@ export default function DeleteWorkoutButton({ workoutId }: { workoutId: string }
 
   async function deleteWorkout() {
     setDeleting(true)
+    const supabase = createClient()
     await supabase.from('exercise_feedback').delete().eq('workout_id', workoutId)
     await supabase.from('workouts').delete().eq('id', workoutId)
     router.push('/history')
