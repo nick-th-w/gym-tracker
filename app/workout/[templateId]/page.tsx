@@ -5,6 +5,8 @@ import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { workoutColors } from '@/lib/workoutColors'
 
+const ALL_EQUIPMENT = ['Barbell', 'Dumbbell', 'Cable Machine', 'Machine', 'Bodyweight', 'Resistance Band']
+
 type Exercise = {
   id: string; name: string; muscle_groups: string[]; equipment: string
   tips: string; difficulty: string; is_favourite: boolean; gif_url: string | null
@@ -37,6 +39,10 @@ export default function WorkoutPreviewPage() {
   const [swapPreview, setSwapPreview] = useState<Exercise | null>(null)
   const [starting, setStarting] = useState(false)
 
+  // Equipment modal
+  const [showEquipmentModal, setShowEquipmentModal] = useState(false)
+  const [selectedEquipment, setSelectedEquipment] = useState<Set<string>>(new Set(ALL_EQUIPMENT))
+
   useEffect(() => {
     async function load() {
       const supabase = createClient()
@@ -62,6 +68,15 @@ export default function WorkoutPreviewPage() {
     load()
   }, [templateId])
 
+  function toggleEquipment(e: string) {
+    setSelectedEquipment(prev => {
+      const next = new Set<string>(Array.from(prev))
+      if (next.has(e)) next.delete(e)
+      else next.add(e)
+      return next
+    })
+  }
+
   // Reset swap filters when opening a new slot
   function openSwap(teId: string) {
     setSwapOpen(swapOpen === teId ? null : teId)
@@ -86,21 +101,41 @@ export default function WorkoutPreviewPage() {
       .slice(0, 25)
   }
 
-  async function beginWorkout() {
+  async function beginWorkout(equipment: Set<string>) {
     if (!template) return
     setStarting(true)
+    setShowEquipmentModal(false)
+
+    // Auto-swap default exercises that need unavailable equipment (manual swaps are preserved)
+    const finalSwaps = { ...swaps }
+    for (const te of tes) {
+      if (finalSwaps[te.id]) continue // user already swapped this slot manually
+      const ex = te.exercises
+      if (ex && !equipment.has(ex.equipment)) {
+        const primaryMuscle = ex.muscle_groups[0]
+        const alt = allExs.find(a =>
+          a.id !== te.exercise_id &&
+          equipment.has(a.equipment) &&
+          a.muscle_groups.includes(primaryMuscle)
+        )
+        if (alt) finalSwaps[te.id] = alt
+      }
+    }
+
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setStarting(false); return }
+
     const { data: workout, error } = await supabase
       .from('workouts')
       .insert({ name: template.name, date: new Date().toISOString().split('T')[0], user_id: user.id })
       .select('id').single()
     if (error || !workout) { setStarting(false); return }
+
     await supabase.from('workout_exercises').insert(
       tes.map(te => ({
         workout_id: workout.id,
-        exercise_id: swaps[te.id]?.id ?? te.exercise_id,
+        exercise_id: finalSwaps[te.id]?.id ?? te.exercise_id,
         order_index: te.order_index,
         target_sets: te.target_sets,
         target_reps_min: te.target_reps_min,
@@ -174,7 +209,6 @@ export default function WorkoutPreviewPage() {
 
               {isOpen && (
                 <div className="border-t border-border px-4 pb-4 pt-3">
-                  {/* Swap filters */}
                   <div className="flex gap-2 mb-3">
                     <input
                       type="search"
@@ -205,7 +239,6 @@ export default function WorkoutPreviewPage() {
                     ))}
                   </div>
 
-                  {/* Preview panel */}
                   {swapPreview && (
                     <div className="bg-background border border-border rounded-xl p-3 mb-3">
                       {swapPreview.gif_url && (() => {
@@ -236,9 +269,7 @@ export default function WorkoutPreviewPage() {
                     </div>
                   )}
 
-                  {/* Exercise list */}
                   <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
-                    {/* Current / default */}
                     <button
                       onClick={() => { setSwaps(s => { const n = { ...s }; delete n[te.id]; return n }); setSwapOpen(null); setSwapPreview(null) }}
                       className={`text-left px-3 py-2.5 rounded-lg text-sm ${!swaps[te.id] ? 'bg-primary/20 text-primary' : 'bg-border text-white'}`}
@@ -270,15 +301,49 @@ export default function WorkoutPreviewPage() {
         })}
       </div>
 
+      {/* Begin Workout button */}
       <div className="fixed bottom-20 left-0 right-0 px-4">
         <button
-          onClick={beginWorkout}
+          onClick={() => setShowEquipmentModal(true)}
           disabled={starting}
           className="w-full bg-success hover:opacity-90 active:scale-95 disabled:opacity-60 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
         >
           {starting ? 'Starting...' : 'Begin Workout'}
         </button>
       </div>
+
+      {/* Equipment selection modal */}
+      {showEquipmentModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setShowEquipmentModal(false)}>
+          <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
+            <h2 className="text-xl font-bold text-white mb-1">What equipment do you have?</h2>
+            <p className="text-secondary-text text-sm mb-6">We'll swap out anything you don't have access to.</p>
+            <div className="flex flex-wrap gap-2 mb-8">
+              {ALL_EQUIPMENT.map(e => (
+                <button
+                  key={e}
+                  onClick={() => toggleEquipment(e)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                    selectedEquipment.has(e)
+                      ? 'bg-success text-white'
+                      : 'bg-border text-secondary-text'
+                  }`}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => beginWorkout(selectedEquipment)}
+              disabled={selectedEquipment.size === 0}
+              className="w-full bg-success active:scale-95 disabled:opacity-40 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
+            >
+              Start Workout
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -33,7 +33,6 @@ const MUSCLE_MAP: Record<string, string[]> = {
   core_mobility:  ['Core', 'Hip Flexors', 'Stability'],
 }
 
-// What to do after each session type
 const NEXT_SESSION: Record<string, string> = {
   'Full Body A':     'Full Body B',
   'Full Body B':     'Back & Biceps',
@@ -49,13 +48,11 @@ const NEXT_SESSION: Record<string, string> = {
 
 export default async function ChooseWorkoutPage() {
   const supabase = await createClient()
-  // templates from cache; last workout fetched fresh (user-specific)
   const [allTemplates, { data: lastWorkout }] = await Promise.all([
     getCachedTemplates(),
     supabase.from('workouts').select('name').eq('completed', true).order('date', { ascending: false }).limit(1).maybeSingle(),
   ])
 
-  // Fall back to Full Body A if no history or last workout name not in the map
   const recommendedName = lastWorkout
     ? (NEXT_SESSION[lastWorkout.name] ?? 'Full Body A')
     : 'Full Body A'
