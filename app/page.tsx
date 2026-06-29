@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { estimate1RM } from '@/lib/recommendation'
 import { getDailyQuote } from '@/lib/quotes'
+import QuoteCard from '@/components/QuoteCard'
+
+export const revalidate = 60
 
 // ── Time-of-day voice ────────────────────────────────────────────────────────
 function getGreeting(name: string | undefined, hour: number): { headline: string; sub: string } {
@@ -73,24 +76,35 @@ export default async function TodayPage() {
   const { headline, sub } = getGreeting(displayName, hourLocal)
   const quote = getDailyQuote()
 
-  // ── Fast path: check session count first ────────────────────────────────────
-  const { count: sessionCount } = await supabase
-    .from('workouts')
-    .select('id', { count: 'exact', head: true })
-    .eq('completed', true)
+  // ── Single parallel fetch: last workout (with exercises+sets) + recent workouts (with muscle data)
+  const [
+    { data: lastWorkout },
+    { data: recentWorkouts },
+  ] = await Promise.all([
+    supabase
+      .from('workouts')
+      .select('id, name, date, duration_minutes, workout_exercises(id, exercises(name), sets(weight_kg, reps, completed))')
+      .eq('completed', true)
+      .order('date', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('workouts')
+      .select('id, date, workout_exercises(exercises(muscle_groups))')
+      .eq('completed', true)
+      .order('date', { ascending: false })
+      .limit(10),
+  ])
 
-  // New user — skip all history queries, render immediately
-  if (!sessionCount) {
+  // New user — render immediately
+  if (!lastWorkout) {
     return (
       <div className="flex flex-col px-4 pt-5 pb-6 gap-3">
         <div>
           <h1 className="text-3xl font-bold text-white mb-1">{headline}</h1>
           <p className="text-secondary-text text-sm">{sub}</p>
         </div>
-        <div className="rounded-2xl px-5 py-5" style={{ backgroundColor: '#fb923c' }}>
-          <p className="text-white font-bold text-2xl leading-snug">&ldquo;{quote.text}&rdquo;</p>
-          <p className="text-white/70 text-sm mt-3 font-medium">— {quote.author}</p>
-        </div>
+        <QuoteCard initial={quote} />
         <Link href="/workout"
           className="w-full bg-success hover:opacity-90 active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all duration-150 block text-center">
           Start Workout
@@ -99,89 +113,43 @@ export default async function TodayPage() {
     )
   }
 
-  // ── Returning user — fetch history data ─────────────────────────────────────
-  const [
-    { data: lastWorkout },
-    { data: recentWorkouts },
-  ] = await Promise.all([
-    supabase
-      .from('workouts')
-      .select('id, name, date, duration_minutes')
-      .eq('completed', true)
-      .order('date', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from('workouts')
-      .select('id, date')
-      .eq('completed', true)
-      .order('date', { ascending: false })
-      .limit(10),
-  ])
-
-  // ── Last session notable set ────────────────────────────────────────────────
+  // ── Last session notable set (derived from nested data — no extra queries)
   let lastSessionNote: string | null = null
-  if (lastWorkout) {
-    const { data: lastWEs } = await supabase
-      .from('workout_exercises')
-      .select('id, exercises(name)')
-      .eq('workout_id', lastWorkout.id)
-
-    const weIds = (lastWEs ?? []).map(we => we.id)
-    const { data: lastSets } = weIds.length
-      ? await supabase
-          .from('sets')
-          .select('workout_exercise_id, weight_kg, reps')
-          .in('workout_exercise_id', weIds)
-          .eq('completed', true)
-      : { data: null }
-
-    if (lastSets?.length) {
-      const best = lastSets.reduce((b, s) =>
-        estimate1RM(s.weight_kg ?? 0, s.reps ?? 0) > estimate1RM(b.weight_kg ?? 0, b.reps ?? 0) ? s : b
-      )
-      const exName = (lastWEs ?? []).find(we => we.id === best.workout_exercise_id)?.exercises
-      const name = (exName as any)?.name
-      if (name && best.weight_kg && best.reps) {
-        lastSessionNote = `${name} · ${best.weight_kg}kg × ${best.reps}`
-      }
+  const lastWEs = (lastWorkout as any).workout_exercises ?? []
+  const completedSets = lastWEs.flatMap((we: any) =>
+    ((we.sets ?? []) as any[])
+      .filter((s: any) => s.completed)
+      .map((s: any) => ({ ...s, _exName: (we.exercises as any)?.name }))
+  )
+  if (completedSets.length) {
+    const best = completedSets.reduce((b: any, s: any) =>
+      estimate1RM(s.weight_kg ?? 0, s.reps ?? 0) > estimate1RM(b.weight_kg ?? 0, b.reps ?? 0) ? s : b
+    )
+    if (best._exName && best.weight_kg && best.reps) {
+      lastSessionNote = `${best._exName} · ${best.weight_kg}kg × ${best.reps}`
     }
   }
 
-  // ── Days since last session ─────────────────────────────────────────────────
+  // ── Days since last session
   const todayStr = new Date().toISOString().split('T')[0]
-  let daysSince: number | null = null
-  if (lastWorkout) {
-    const [y, m, d] = lastWorkout.date.split('-').map(Number)
-    const [ty, tm, td] = todayStr.split('-').map(Number)
-    daysSince = Math.floor(
-      (new Date(ty, tm - 1, td).getTime() - new Date(y, m - 1, d).getTime()) / 86_400_000
-    )
-  }
+  const [y, m, d] = lastWorkout.date.split('-').map(Number)
+  const [ty, tm, td] = todayStr.split('-').map(Number)
+  const daysSince = Math.floor(
+    (new Date(ty, tm - 1, td).getTime() - new Date(y, m - 1, d).getTime()) / 86_400_000
+  )
 
-  // ── Muscle readiness ────────────────────────────────────────────────────────
-  // Get all workout_exercises with muscle_groups for recent sessions
-  const recentIds = (recentWorkouts ?? []).map(w => w.id)
-  const dateByWorkout: Record<string, string> = {}
-  for (const w of recentWorkouts ?? []) dateByWorkout[w.id] = w.date
+  // ── Muscle readiness (derived from nested recentWorkouts — no extra query)
+  const allRecentWEs = (recentWorkouts ?? []).flatMap(w =>
+    ((w as any).workout_exercises ?? []).map((we: any) => ({ we, date: w.date }))
+  )
 
-  const { data: recentWEs } = recentIds.length
-    ? await supabase
-        .from('workout_exercises')
-        .select('workout_id, exercises(muscle_groups)')
-        .in('workout_id', recentIds)
-    : { data: null }
-
-  // Last date each primary muscle group was trained
   const lastTrainedByMuscle: Record<string, string> = {}
-  for (const we of recentWEs ?? []) {
+  for (const { we, date } of allRecentWEs) {
     const muscles: string[] = (we.exercises as any)?.muscle_groups ?? []
-    const date = dateByWorkout[we.workout_id]
-    if (!date) continue
-    for (const m of muscles) {
+    for (const muscle of muscles) {
       const primary = PRIMARY_MUSCLES.find(p =>
-        m.toLowerCase().includes(p.toLowerCase()) ||
-        (p === 'Arms' && (m === 'Biceps' || m === 'Triceps'))
+        muscle.toLowerCase().includes(p.toLowerCase()) ||
+        (p === 'Arms' && (muscle === 'Biceps' || muscle === 'Triceps'))
       )
       if (primary && (!lastTrainedByMuscle[primary] || date > lastTrainedByMuscle[primary])) {
         lastTrainedByMuscle[primary] = date
@@ -194,13 +162,11 @@ export default async function TodayPage() {
     status: getMuscleReadiness(muscle, lastTrainedByMuscle[muscle], todayStr),
   }))
 
-  const restLabel = daysSince === null
-    ? null
-    : daysSince === 0
-      ? 'Trained today'
-      : daysSince === 1
-        ? '1 day rest'
-        : `${daysSince} days rest`
+  const restLabel = daysSince === 0
+    ? 'Trained today'
+    : daysSince === 1
+      ? '1 day rest'
+      : `${daysSince} days rest`
 
   return (
     <div className="flex flex-col px-4 pt-5 pb-6 gap-3">
@@ -232,7 +198,7 @@ export default async function TodayPage() {
       )}
 
       {/* ── Muscle readiness ─────────────────────────────────────────────── */}
-      {recentWEs && recentWEs.length > 0 && (
+      {allRecentWEs.length > 0 && (
         <div className="bg-card border border-border rounded-2xl px-4 py-3">
           <p className="text-secondary-text text-xs uppercase tracking-wide mb-2.5">Muscle readiness</p>
           <div className="flex flex-wrap gap-2">
@@ -258,12 +224,7 @@ export default async function TodayPage() {
       )}
 
       {/* ── Quote of the day ─────────────────────────────────────────────── */}
-      <div className="rounded-2xl px-5 py-5" style={{ backgroundColor: '#fb923c' }}>
-        <p className="text-white font-bold text-2xl leading-snug">
-          &ldquo;{quote.text}&rdquo;
-        </p>
-        <p className="text-white/70 text-sm mt-3 font-medium">— {quote.author}</p>
-      </div>
+      <QuoteCard initial={quote} />
 
       {/* ── CTA ──────────────────────────────────────────────────────────── */}
       <Link
