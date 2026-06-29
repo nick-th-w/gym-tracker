@@ -38,9 +38,6 @@ export default function WorkoutPreviewPage() {
   const [swapFavOnly, setSwapFavOnly] = useState(false)
   const [swapPreview, setSwapPreview] = useState<Exercise | null>(null)
   const [starting, setStarting] = useState(false)
-
-  // Equipment modal
-  const [showEquipmentModal, setShowEquipmentModal] = useState(false)
   const [selectedEquipment, setSelectedEquipment] = useState<Set<string>>(new Set(ALL_EQUIPMENT))
 
   useEffect(() => {
@@ -73,11 +70,43 @@ export default function WorkoutPreviewPage() {
       const next = new Set<string>(Array.from(prev))
       if (next.has(e)) next.delete(e)
       else next.add(e)
+      // Auto-clear any swaps that are now invalid with the new equipment set
+      setSwaps(s => {
+        const cleaned = { ...s }
+        for (const [teId, ex] of Object.entries(cleaned)) {
+          if (!next.has(ex.equipment)) delete cleaned[teId]
+        }
+        return cleaned
+      })
       return next
     })
   }
 
-  // Reset swap filters when opening a new slot
+  // When equipment changes, auto-swap exercises that need unavailable equipment (no manual swap yet)
+  useEffect(() => {
+    if (!tes.length || !allExs.length) return
+    setSwaps(prev => {
+      const next = { ...prev }
+      for (const te of tes) {
+        if (next[te.id]) continue // keep manual swaps
+        const ex = te.exercises
+        if (ex && !selectedEquipment.has(ex.equipment)) {
+          const primaryMuscle = ex.muscle_groups[0]
+          const alt = allExs.find(a =>
+            a.id !== te.exercise_id &&
+            selectedEquipment.has(a.equipment) &&
+            a.muscle_groups.includes(primaryMuscle)
+          )
+          if (alt) next[te.id] = alt
+        } else {
+          // equipment re-enabled: remove auto-swap so default exercise returns
+          if (next[te.id] && !prev[te.id]) delete next[te.id]
+        }
+      }
+      return next
+    })
+  }, [selectedEquipment, tes, allExs])
+
   function openSwap(teId: string) {
     setSwapOpen(swapOpen === teId ? null : teId)
     setSwapSearch('')
@@ -93,6 +122,7 @@ export default function WorkoutPreviewPage() {
       .filter(e => {
         if (e.id === (swaps[te.id]?.id ?? te.exercise_id)) return false
         if (primaryMuscle && !(e.muscle_groups).includes(primaryMuscle)) return false
+        if (!selectedEquipment.has(e.equipment)) return false
         if (swapFavOnly && !e.is_favourite) return false
         if (swapDifficulty && e.difficulty !== swapDifficulty) return false
         if (swapSearch && !e.name.toLowerCase().includes(swapSearch.toLowerCase())) return false
@@ -101,41 +131,21 @@ export default function WorkoutPreviewPage() {
       .slice(0, 25)
   }
 
-  async function beginWorkout(equipment: Set<string>) {
+  async function beginWorkout() {
     if (!template) return
     setStarting(true)
-    setShowEquipmentModal(false)
-
-    // Auto-swap default exercises that need unavailable equipment (manual swaps are preserved)
-    const finalSwaps = { ...swaps }
-    for (const te of tes) {
-      if (finalSwaps[te.id]) continue // user already swapped this slot manually
-      const ex = te.exercises
-      if (ex && !equipment.has(ex.equipment)) {
-        const primaryMuscle = ex.muscle_groups[0]
-        const alt = allExs.find(a =>
-          a.id !== te.exercise_id &&
-          equipment.has(a.equipment) &&
-          a.muscle_groups.includes(primaryMuscle)
-        )
-        if (alt) finalSwaps[te.id] = alt
-      }
-    }
-
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setStarting(false); return }
-
     const { data: workout, error } = await supabase
       .from('workouts')
       .insert({ name: template.name, date: new Date().toISOString().split('T')[0], user_id: user.id })
       .select('id').single()
     if (error || !workout) { setStarting(false); return }
-
     await supabase.from('workout_exercises').insert(
       tes.map(te => ({
         workout_id: workout.id,
-        exercise_id: finalSwaps[te.id]?.id ?? te.exercise_id,
+        exercise_id: swaps[te.id]?.id ?? te.exercise_id,
         order_index: te.order_index,
         target_sets: te.target_sets,
         target_reps_min: te.target_reps_min,
@@ -152,12 +162,13 @@ export default function WorkoutPreviewPage() {
   if (!template) return <div className="px-4 pt-8"><p className="text-secondary-text">Loading...</p></div>
 
   const colors = workoutColors(template.focus ?? template.name)
+  const allSelected = ALL_EQUIPMENT.every(e => selectedEquipment.has(e))
 
   return (
     <div className="px-4 pt-8 pb-32">
       <button onClick={() => router.back()} className="text-secondary-text text-sm mb-4 block">← Back</button>
 
-      <div className={`${colors.bg} ${colors.border} border rounded-2xl p-4 mb-6`}>
+      <div className={`${colors.bg} ${colors.border} border rounded-2xl p-4 mb-4`}>
         <div className="flex items-start justify-between mb-1">
           <h1 className="text-3xl font-bold text-white">{template.name}</h1>
           <span className="text-secondary-text text-sm mt-1 shrink-0 ml-2">~{template.estimated_duration_minutes} min</span>
@@ -170,7 +181,40 @@ export default function WorkoutPreviewPage() {
         </div>
       </div>
 
-      <div className="bg-card border border-border rounded-xl p-3 mb-6">
+      {/* Equipment filter — inline, always visible */}
+      <div className="bg-card border border-border rounded-xl p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-white text-sm font-semibold">Available equipment</p>
+          <button
+            onClick={() => setSelectedEquipment(allSelected ? new Set() : new Set(ALL_EQUIPMENT))}
+            className="text-xs text-primary font-medium"
+          >
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {ALL_EQUIPMENT.map(e => (
+            <button
+              key={e}
+              onClick={() => toggleEquipment(e)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                selectedEquipment.has(e)
+                  ? 'bg-success text-white'
+                  : 'bg-border text-secondary-text line-through'
+              }`}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+        {!allSelected && (
+          <p className="text-secondary-text text-xs mt-3">
+            Exercises will be swapped to match your available equipment.
+          </p>
+        )}
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-3 mb-4">
         <p className="text-secondary-text text-xs uppercase tracking-wide mb-2">Muscles worked</p>
         <div className="flex flex-wrap gap-1.5">
           {allMuscles.map(m => (
@@ -183,6 +227,7 @@ export default function WorkoutPreviewPage() {
         {tes.map(te => {
           const ex = swaps[te.id] ?? te.exercises
           const isOpen = swapOpen === te.id
+          const wasAutoSwapped = !!swaps[te.id] && !te.exercises || (swaps[te.id] && swaps[te.id].id !== te.exercises?.id)
           const repRange = te.target_reps_min === te.target_reps_max
             ? `${te.target_reps_min} ${te.reps_unit}`
             : `${te.target_reps_min}–${te.target_reps_max} ${te.reps_unit}`
@@ -193,7 +238,12 @@ export default function WorkoutPreviewPage() {
               <div className="p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className="text-white font-semibold">{ex?.name}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-white font-semibold">{ex?.name}</p>
+                      {wasAutoSwapped && (
+                        <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">swapped</span>
+                      )}
+                    </div>
                     <p className="text-secondary-text text-xs mt-0.5">{te.target_sets} sets · {repRange} · {ex?.equipment}</p>
                     <div className="flex flex-wrap gap-1 mt-2">
                       {(ex?.muscle_groups ?? []).map(m => (
@@ -274,7 +324,7 @@ export default function WorkoutPreviewPage() {
                       onClick={() => { setSwaps(s => { const n = { ...s }; delete n[te.id]; return n }); setSwapOpen(null); setSwapPreview(null) }}
                       className={`text-left px-3 py-2.5 rounded-lg text-sm ${!swaps[te.id] ? 'bg-primary/20 text-primary' : 'bg-border text-white'}`}
                     >
-                      {te.exercises?.name} <span className="text-secondary-text text-xs">(current)</span>
+                      {te.exercises?.name} <span className="text-secondary-text text-xs">(default)</span>
                     </button>
                     {swapOptions.map(opt => (
                       <button
@@ -301,49 +351,15 @@ export default function WorkoutPreviewPage() {
         })}
       </div>
 
-      {/* Begin Workout button */}
       <div className="fixed bottom-20 left-0 right-0 px-4">
         <button
-          onClick={() => setShowEquipmentModal(true)}
-          disabled={starting}
+          onClick={beginWorkout}
+          disabled={starting || selectedEquipment.size === 0}
           className="w-full bg-success hover:opacity-90 active:scale-95 disabled:opacity-60 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
         >
           {starting ? 'Starting...' : 'Begin Workout'}
         </button>
       </div>
-
-      {/* Equipment selection modal */}
-      {showEquipmentModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setShowEquipmentModal(false)}>
-          <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
-            <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
-            <h2 className="text-xl font-bold text-white mb-1">What equipment do you have?</h2>
-            <p className="text-secondary-text text-sm mb-6">We'll swap out anything you don't have access to.</p>
-            <div className="flex flex-wrap gap-2 mb-8">
-              {ALL_EQUIPMENT.map(e => (
-                <button
-                  key={e}
-                  onClick={() => toggleEquipment(e)}
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                    selectedEquipment.has(e)
-                      ? 'bg-success text-white'
-                      : 'bg-border text-secondary-text'
-                  }`}
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => beginWorkout(selectedEquipment)}
-              disabled={selectedEquipment.size === 0}
-              className="w-full bg-success active:scale-95 disabled:opacity-40 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
-            >
-              Start Workout
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
