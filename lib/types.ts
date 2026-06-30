@@ -1,5 +1,25 @@
 export type GoalType = 'strength' | 'hypertrophy' | 'accessory'
 
+export interface Group {
+  id: string
+  name: string
+  invite_code: string
+  created_by: string
+}
+
+export interface GroupMember {
+  group_id: string
+  user_id: string
+  role: 'admin' | 'member'
+}
+
+export interface LeaderboardEntry {
+  user_id: string
+  display_name: string
+  all_time_count: number
+  weekly_count: number
+}
+
 export interface UserProfile {
   user_id: string
   display_name: string | null
