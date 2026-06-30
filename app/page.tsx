@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { estimate1RM } from '@/lib/recommendation'
 import { getDailyQuote } from '@/lib/quotes'
 import QuoteCard from '@/components/QuoteCard'
+import GroupRankCallout from '@/components/GroupRankCallout'
 
 export const revalidate = 60
 
@@ -109,6 +110,7 @@ export default async function TodayPage() {
           className="w-full bg-success hover:opacity-90 active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all duration-150 block text-center">
           Start Workout
         </Link>
+        {user && <GroupRankCallout userId={user.id} />}
       </div>
     )
   }
@@ -233,6 +235,9 @@ export default async function TodayPage() {
       >
         Start Workout
       </Link>
+
+      {/* ── Group rank ───────────────────────────────────────────────────── */}
+      {user && <GroupRankCallout userId={user.id} />}
     </div>
   )
 }

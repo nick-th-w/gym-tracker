@@ -16,6 +16,13 @@ export default function GroupSettingsForm({
   const router = useRouter()
   const [name, setName] = useState(group.name)
   const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  async function handleCopyCode() {
+    await navigator.clipboard.writeText(group.invite_code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   async function handleRename(e: React.FormEvent) {
     e.preventDefault()
@@ -90,13 +97,22 @@ export default function GroupSettingsForm({
         <p className="text-secondary-text text-xs uppercase tracking-wide mb-2">Invite code</p>
         <div className="flex items-center justify-between">
           <p className="text-white text-lg font-mono">{group.invite_code}</p>
-          <button
-            onClick={handleRegenerateCode}
-            disabled={loading}
-            className="text-primary text-xs font-medium disabled:opacity-50"
-          >
-            Regenerate
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleCopyCode}
+              disabled={loading}
+              className="text-primary text-xs font-medium disabled:opacity-50"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+            <button
+              onClick={handleRegenerateCode}
+              disabled={loading}
+              className="text-primary text-xs font-medium disabled:opacity-50"
+            >
+              Regenerate
+            </button>
+          </div>
         </div>
       </div>
 

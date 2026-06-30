@@ -3,6 +3,14 @@
 import { useState } from 'react'
 import { LeaderboardEntry } from '@/lib/types'
 
+const WINDOWS = [
+  { key: 'last_7_days_count', label: 'Last 7 days' },
+  { key: 'last_30_days_count', label: 'Last 30 days' },
+  { key: 'all_time_count', label: 'All-time' },
+] as const
+
+type WindowKey = typeof WINDOWS[number]['key']
+
 export default function LeaderboardList({
   entries,
   currentUserId,
@@ -10,12 +18,10 @@ export default function LeaderboardList({
   entries: LeaderboardEntry[]
   currentUserId: string
 }) {
-  const [period, setPeriod] = useState<'weekly' | 'all_time'>('weekly')
+  const [period, setPeriod] = useState<WindowKey>('last_7_days_count')
 
   const sorted = [...entries].sort((a, b) => {
-    const aCount = period === 'weekly' ? a.weekly_count : a.all_time_count
-    const bCount = period === 'weekly' ? b.weekly_count : b.all_time_count
-    if (bCount !== aCount) return bCount - aCount
+    if (b[period] !== a[period]) return b[period] - a[period]
     return a.display_name.localeCompare(b.display_name)
   })
 
@@ -23,7 +29,7 @@ export default function LeaderboardList({
   let rank = 0
   let lastCount: number | null = null
   const ranked = sorted.map((entry, i) => {
-    const count = period === 'weekly' ? entry.weekly_count : entry.all_time_count
+    const count = entry[period]
     if (count !== lastCount) { rank = i + 1; lastCount = count }
     return { ...entry, rank, count }
   })
@@ -31,18 +37,15 @@ export default function LeaderboardList({
   return (
     <div>
       <div className="flex bg-card border border-border rounded-xl p-1 mb-4">
-        <button
-          onClick={() => setPeriod('weekly')}
-          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${period === 'weekly' ? 'bg-primary text-white' : 'text-secondary-text'}`}
-        >
-          This week
-        </button>
-        <button
-          onClick={() => setPeriod('all_time')}
-          className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${period === 'all_time' ? 'bg-primary text-white' : 'text-secondary-text'}`}
-        >
-          All-time
-        </button>
+        {WINDOWS.map(w => (
+          <button
+            key={w.key}
+            onClick={() => setPeriod(w.key)}
+            className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-colors ${period === w.key ? 'bg-primary text-white' : 'text-secondary-text'}`}
+          >
+            {w.label}
+          </button>
+        ))}
       </div>
 
       {ranked.length === 0 ? (

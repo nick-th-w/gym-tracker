@@ -17,7 +17,8 @@ export interface LeaderboardEntry {
   user_id: string
   display_name: string
   all_time_count: number
-  weekly_count: number
+  last_7_days_count: number
+  last_30_days_count: number
 }
 
 export interface UserProfile {

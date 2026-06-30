@@ -10,6 +10,7 @@ export default async function ProfilePage() {
   if (!user) redirect('/login')
 
   const displayName = user.user_metadata?.display_name as string | undefined
+  const joinedDate = new Date(user.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 
   const { count: sessionCount } = await supabase
     .from('workouts')
@@ -45,6 +46,11 @@ export default async function ProfilePage() {
       <div className="bg-card border border-border rounded-2xl p-4 mb-6">
         <p className="text-secondary-text text-xs uppercase tracking-wide mb-1">Email</p>
         <p className="text-white text-sm">{user.email}</p>
+      </div>
+
+      <div className="bg-card border border-border rounded-2xl p-4 mb-6">
+        <p className="text-secondary-text text-xs uppercase tracking-wide mb-1">Member since</p>
+        <p className="text-white text-sm">{joinedDate}</p>
       </div>
 
       <SignOutButton />
