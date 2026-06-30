@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
 // PATCH — rename group or regenerate invite code. Body: { groupId, name? } or { groupId, regenerateCode: true }
@@ -22,6 +23,8 @@ export async function PATCH(request: NextRequest) {
   const { error } = await supabase.from('groups').update(update).eq('id', groupId)
   if (error) return NextResponse.json({ error: 'Could not update group' }, { status: 400 })
 
+  revalidatePath('/groups', 'layout')
+  revalidatePath('/')
   return NextResponse.json({ ok: true })
 }
 
@@ -37,5 +40,7 @@ export async function DELETE(request: NextRequest) {
   const { error } = await supabase.from('groups').delete().eq('id', groupId)
   if (error) return NextResponse.json({ error: 'Could not delete group' }, { status: 400 })
 
+  revalidatePath('/groups', 'layout')
+  revalidatePath('/')
   return NextResponse.json({ ok: true })
 }

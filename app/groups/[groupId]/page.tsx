@@ -6,21 +6,25 @@ import LeaderboardList from './LeaderboardList'
 import LeaveGroupButton from './LeaveGroupButton'
 import SoloStats from '../SoloStats'
 
+export const revalidate = 60
+
 export default async function GroupLeaderboardPage({ params }: { params: Promise<{ groupId: string }> }) {
   const { groupId } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: group } = await supabase
-    .from('groups')
-    .select('id, name, invite_code, created_by')
-    .eq('id', groupId)
-    .maybeSingle()
+  const [{ data: group }, { data: leaderboard }] = await Promise.all([
+    supabase
+      .from('groups')
+      .select('id, name, invite_code, created_by')
+      .eq('id', groupId)
+      .maybeSingle(),
+    supabase.rpc('get_group_leaderboard', { p_group_id: groupId }),
+  ])
 
   if (!group) notFound()
 
-  const { data: leaderboard } = await supabase.rpc('get_group_leaderboard', { p_group_id: groupId })
   const entries = (leaderboard ?? []) as LeaderboardEntry[]
 
   const isAdmin = group.created_by === user.id

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
 export async function POST(request: NextRequest) {
@@ -20,5 +21,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid invite code' }, { status: 400 })
   }
 
+  revalidatePath('/groups', 'layout')
+  revalidatePath('/')
   return NextResponse.json({ groupId })
 }

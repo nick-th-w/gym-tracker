@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import GroupJoinCreate from './GroupJoinCreate'
 import SoloStats from './SoloStats'
 
+export const revalidate = 60
+
 export default async function GroupsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
