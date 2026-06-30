@@ -1,9 +1,63 @@
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAnonClient } from '@supabase/supabase-js'
+import { unstable_cache } from 'next/cache'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
 import { getStrengthRank, hasStandards, RANK_META } from '@/lib/strengthStandards'
 import type { UserProfile } from '@/lib/types'
+
+export const revalidate = 60
 import ExerciseSelect from './ExerciseSelect'
+
+interface CompletedWorkout { id: string; date: string }
+interface WorkoutExerciseRow { id: string; exercise_id: string; workout_id: string }
+interface SetRow { workout_exercise_id: string; weight_kg: number | null; reps: number | null }
+
+// Mirrors exercises/page.tsx's getCachedCompletionCounts — same waterfall shape
+// (workouts -> workout_exercises -> sets), cached per-user so the full history
+// scan doesn't re-run on every Progress tab visit.
+function getCachedProgressData(userId: string) {
+  return unstable_cache(
+    async () => {
+      const supabase = createAnonClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+
+      const { data: completedWorkouts } = await supabase
+        .from('workouts')
+        .select('id, date')
+        .eq('user_id', userId)
+        .eq('completed', true)
+        .order('date')
+
+      const workoutIds = (completedWorkouts ?? []).map((w: CompletedWorkout) => w.id)
+      if (!workoutIds.length) {
+        return { completedWorkouts: completedWorkouts ?? [], allWEs: [] as WorkoutExerciseRow[], allSets: [] as SetRow[] }
+      }
+
+      const { data: allWEs } = await supabase
+        .from('workout_exercises')
+        .select('id, exercise_id, workout_id')
+        .in('workout_id', workoutIds)
+
+      const weIds = (allWEs ?? []).map((we: WorkoutExerciseRow) => we.id)
+      if (!weIds.length) {
+        return { completedWorkouts: completedWorkouts ?? [], allWEs: allWEs ?? [], allSets: [] as SetRow[] }
+      }
+
+      const { data: allSets } = await supabase
+        .from('sets')
+        .select('workout_exercise_id, weight_kg, reps')
+        .in('workout_exercise_id', weIds)
+        .eq('completed', true)
+
+      return { completedWorkouts: completedWorkouts ?? [], allWEs: allWEs ?? [], allSets: allSets ?? [] }
+    },
+    [`progress-data-${userId}`],
+    { revalidate: 300 }
+  )()
+}
 
 function fmtDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -52,12 +106,22 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
   const activeExerciseId = searchParams?.exercise ?? null
 
   const { data: { user } } = await supabase.auth.getUser()
-  const { data: profileData } = user
-    ? await supabase.from('user_profiles').select('body_weight_kg, sex').eq('user_id', user.id).maybeSingle()
-    : { data: null }
-  const profile = profileData as Pick<UserProfile, 'body_weight_kg' | 'sex'> | null
 
-  const { data: allExercises } = await supabase.from('exercises').select('id, name, muscle_groups').order('name')
+  // Profile + exercise list run live in parallel; the expensive workout/sets
+  // waterfall is cached per-user for 5 minutes (see getCachedProgressData above)
+  const [{ data: profileData }, { data: allExercises }, progressData] = await Promise.all([
+    user
+      ? supabase.from('user_profiles').select('body_weight_kg, sex').eq('user_id', user.id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase.from('exercises').select('id, name, muscle_groups').order('name'),
+    user
+      ? getCachedProgressData(user.id)
+      : Promise.resolve({ completedWorkouts: [] as CompletedWorkout[], allWEs: [] as WorkoutExerciseRow[], allSets: [] as SetRow[] }),
+  ])
+
+  const { completedWorkouts, allWEs, allSets } = progressData
+
+  const profile = profileData as Pick<UserProfile, 'body_weight_kg' | 'sex'> | null
 
   const allMuscles = [...new Set((allExercises ?? []).flatMap(e => e.muscle_groups as string[]))].sort()
 
@@ -67,29 +131,16 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
 
   const activeExerciseName = allExercises?.find(e => e.id === activeExerciseId)?.name ?? null
 
-  const { data: completedWorkouts } = await supabase
-    .from('workouts').select('id, date').eq('completed', true).order('date')
-
-  const allWorkoutIds = (completedWorkouts ?? []).map(w => w.id)
   const dateByWorkout: Record<string, string> = {}
-  for (const w of completedWorkouts ?? []) dateByWorkout[w.id] = w.date
-
-  const { data: allWEs } = allWorkoutIds.length
-    ? await supabase.from('workout_exercises').select('id, exercise_id, workout_id').in('workout_id', allWorkoutIds)
-    : { data: null }
-
-  const allWeIds = (allWEs ?? []).map(we => we.id)
-  const { data: allSets } = allWeIds.length
-    ? await supabase.from('sets').select('workout_exercise_id, weight_kg, reps').in('workout_exercise_id', allWeIds).eq('completed', true)
-    : { data: null }
+  for (const w of completedWorkouts) dateByWorkout[w.id] = w.date
 
   const setsByWE: Record<string, { weight_kg: number; reps: number }[]> = {}
-  for (const s of allSets ?? []) {
+  for (const s of allSets) {
     if (s.weight_kg && s.reps) (setsByWE[s.workout_exercise_id] ??= []).push({ weight_kg: s.weight_kg, reps: s.reps })
   }
 
   const weByExercise: Record<string, { weId: string; workoutId: string }[]> = {}
-  for (const we of allWEs ?? []) (weByExercise[we.exercise_id] ??= []).push({ weId: we.id, workoutId: we.workout_id })
+  for (const we of allWEs) (weByExercise[we.exercise_id] ??= []).push({ weId: we.id, workoutId: we.workout_id })
 
   // Personal bests
   const pbByExercise: Record<string, { rm: number; weight: number; reps: number }> = {}

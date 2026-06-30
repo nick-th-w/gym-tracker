@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import GroupJoinCreate from './GroupJoinCreate'
+import GroupLeaderboardView from './GroupLeaderboardView'
 import SoloStats from './SoloStats'
 
 export const revalidate = 60
@@ -16,7 +17,16 @@ export default async function GroupsPage() {
     .eq('user_id', user.id)
     .maybeSingle()
 
-  if (membership) redirect(`/groups/${membership.group_id}`)
+  // Render the leaderboard inline at /groups instead of redirecting to
+  // /groups/[groupId] — avoids a second full page load + duplicate queries
+  // for the common case of an already-grouped user opening the tab.
+  if (membership) {
+    return (
+      <div className="px-4 pt-8 pb-6">
+        <GroupLeaderboardView groupId={membership.group_id} user={user} />
+      </div>
+    )
+  }
 
   const todayStr = new Date().toISOString().split('T')[0]
   const last7DaysCutoff = new Date(Date.now() - 6 * 86_400_000).toISOString().split('T')[0]
