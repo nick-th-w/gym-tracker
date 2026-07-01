@@ -17,6 +17,7 @@ type EditExercise = {
   pbDelta?: number
   sets: EditSet[]
 }
+type SwapChoice = { id: string; name: string; muscle_groups: string[] }
 
 function formatDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -36,12 +37,14 @@ export default function WorkoutEditor({
   initialName,
   initialDate,
   exercises,
+  deleteSlot,
   children,
 }: {
   workoutId: string
   initialName: string
   initialDate: string
   exercises: EditExercise[]
+  deleteSlot: React.ReactNode
   children: React.ReactNode
 }) {
   const router = useRouter()
@@ -50,6 +53,11 @@ export default function WorkoutEditor({
   const [name, setName] = useState(initialName)
   const [date, setDate] = useState(initialDate)
   const [rows, setRows] = useState<EditExercise[]>(exercises)
+
+  const [swapOpenFor, setSwapOpenFor] = useState<string | null>(null)
+  const [swapSearch, setSwapSearch] = useState('')
+  const [swapChoices, setSwapChoices] = useState<SwapChoice[] | null>(null)
+  const [swapLoading, setSwapLoading] = useState(false)
 
   function updateSet(weId: string, si: number, field: 'weight_kg' | 'reps', val: number) {
     setRows(prev => prev.map(r => r.weId !== weId ? r : {
@@ -73,6 +81,30 @@ export default function WorkoutEditor({
     setRows(prev => prev.map(r => r.weId !== weId ? r : { ...r, rating }))
   }
 
+  function removeExercise(weId: string) {
+    setRows(prev => prev.filter(r => r.weId !== weId))
+  }
+
+  async function openSwap(weId: string) {
+    setSwapOpenFor(weId)
+    setSwapSearch('')
+    if (swapChoices) return
+    setSwapLoading(true)
+    const supabase = createClient()
+    const { data } = await supabase.from('exercises').select('id, name, muscle_groups').order('name')
+    setSwapChoices((data ?? []) as SwapChoice[])
+    setSwapLoading(false)
+  }
+
+  function chooseSwap(choice: SwapChoice) {
+    const weId = swapOpenFor
+    if (!weId) return
+    setRows(prev => prev.map(r => r.weId !== weId ? r : {
+      ...r, exerciseId: choice.id, name: choice.name, muscleGroups: choice.muscle_groups,
+    }))
+    setSwapOpenFor(null)
+  }
+
   function cancel() {
     setName(initialName)
     setDate(initialDate)
@@ -87,8 +119,25 @@ export default function WorkoutEditor({
 
     await supabase.from('workouts').update({ name, date }).eq('id', workoutId)
 
+    const removed = exercises.filter(e => !rows.some(r => r.weId === e.weId))
+    if (removed.length) {
+      const removedWeIds = removed.map(e => e.weId)
+      const removedExerciseIds = removed.map(e => e.exerciseId)
+      await Promise.all([
+        supabase.from('sets').delete().in('workout_exercise_id', removedWeIds),
+        supabase.from('exercise_feedback').delete().eq('workout_id', workoutId).in('exercise_id', removedExerciseIds),
+        supabase.from('workout_exercises').delete().in('id', removedWeIds),
+      ])
+    }
+
     for (const r of rows) {
-      const originalIds = new Set(exercises.find(e => e.weId === r.weId)?.sets.map(s => s.id).filter(Boolean))
+      const original = exercises.find(e => e.weId === r.weId)
+
+      if (original && original.exerciseId !== r.exerciseId) {
+        await supabase.from('workout_exercises').update({ exercise_id: r.exerciseId }).eq('id', r.weId)
+      }
+
+      const originalIds = new Set((original?.sets ?? []).map(s => s.id).filter(Boolean))
       const keptIds = new Set(r.sets.map(s => s.id).filter(Boolean))
       const deletedIds = [...originalIds].filter(id => !keptIds.has(id))
 
@@ -122,6 +171,7 @@ export default function WorkoutEditor({
   }
 
   const colors = workoutColors(name)
+  const filteredSwapChoices = (swapChoices ?? []).filter(c => c.name.toLowerCase().includes(swapSearch.toLowerCase()))
 
   return (
     <div>
@@ -149,25 +199,8 @@ export default function WorkoutEditor({
 
       {children}
 
-      <div className="flex justify-end mb-3">
-        {editing ? (
-          <div className="flex gap-3">
-            <button onClick={cancel} disabled={saving} className="text-secondary-text text-sm underline underline-offset-2">
-              Cancel
-            </button>
-            <button onClick={save} disabled={saving} className="bg-success active:scale-95 disabled:opacity-60 text-white text-sm font-semibold px-4 py-1.5 rounded-full transition-all">
-              {saving ? 'Saving...' : 'Save changes'}
-            </button>
-          </div>
-        ) : (
-          <button onClick={() => setEditing(true)} className="text-secondary-text text-sm underline underline-offset-2">
-            Edit workout
-          </button>
-        )}
-      </div>
-
       {/* Exercise rows */}
-      <div className="flex flex-col gap-3 mb-8">
+      <div className="flex flex-col gap-3 mb-6">
         {rows.map(r => {
           const ratingMeta = r.rating ? RATING_META[r.rating] : null
 
@@ -224,7 +257,17 @@ export default function WorkoutEditor({
 
           return (
             <div key={r.weId} className="bg-card border border-border rounded-xl p-3">
-              <p className="text-white font-semibold text-sm mb-2">{r.name}</p>
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <p className="text-white font-semibold text-sm">{r.name}</p>
+                <div className="flex gap-3 shrink-0">
+                  <button onClick={() => openSwap(r.weId)} className="text-primary text-xs underline underline-offset-2">
+                    Change
+                  </button>
+                  <button onClick={() => removeExercise(r.weId)} className="text-red-400 text-xs underline underline-offset-2">
+                    Remove
+                  </button>
+                </div>
+              </div>
 
               <div className="flex flex-col gap-2 mb-3">
                 {r.sets.map((s, i) => (
@@ -268,7 +311,63 @@ export default function WorkoutEditor({
             </div>
           )
         })}
+        {editing && rows.length === 0 && (
+          <p className="text-secondary-text text-sm text-center py-4">No exercises left in this workout.</p>
+        )}
       </div>
+
+      {/* Bottom action tiles */}
+      <div className="grid grid-cols-2 gap-3">
+        {editing ? (
+          <>
+            <button onClick={cancel} disabled={saving} className="bg-card border border-border rounded-xl py-3 text-secondary-text text-sm font-medium disabled:opacity-60 active:scale-[0.98] transition-transform">
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving} className="bg-success rounded-xl py-3 text-white text-sm font-semibold disabled:opacity-60 active:scale-[0.98] transition-transform">
+              {saving ? 'Saving...' : 'Save changes'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setEditing(true)} className="bg-card border border-border rounded-xl py-3 text-white text-sm font-medium active:scale-[0.98] transition-transform">
+              Edit workout
+            </button>
+            {deleteSlot}
+          </>
+        )}
+      </div>
+
+      {/* Swap-exercise bottom sheet */}
+      {swapOpenFor && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setSwapOpenFor(null)}>
+          <div className="bg-card w-full rounded-t-3xl p-6 pb-10 max-h-[75vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4 shrink-0" />
+            <h2 className="text-lg font-bold text-white mb-3 shrink-0">Change exercise</h2>
+            <input
+              type="search" placeholder="Search exercises..." value={swapSearch}
+              onChange={e => setSwapSearch(e.target.value)}
+              className="w-full bg-border text-white text-sm rounded-xl px-4 py-3 mb-3 placeholder:text-secondary-text shrink-0"
+            />
+            <div className="overflow-y-auto flex flex-col gap-2">
+              {swapLoading && <p className="text-secondary-text text-sm text-center py-4">Loading exercises...</p>}
+              {!swapLoading && filteredSwapChoices.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => chooseSwap(c)}
+                  className="flex items-center justify-between p-3 rounded-xl border border-border bg-background text-left active:scale-[0.98] transition-transform"
+                >
+                  <div>
+                    <p className="text-white text-sm font-medium">{c.name}</p>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {c.muscle_groups.map(m => <span key={m} className="bg-primary/15 text-primary text-xs px-1.5 py-0.5 rounded-full">{m}</span>)}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -22,7 +22,7 @@ export default function DeleteWorkoutButton({ workoutId }: { workoutId: string }
     <>
       <button
         onClick={() => setShowModal(true)}
-        className="text-secondary-text text-sm underline underline-offset-2"
+        className="w-full bg-card border border-red-500/30 rounded-xl py-3 text-red-400 text-sm font-medium active:scale-[0.98] transition-transform"
       >
         Delete workout
       </button>

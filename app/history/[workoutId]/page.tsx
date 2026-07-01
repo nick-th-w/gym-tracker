@@ -124,6 +124,7 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
         initialName={workout.name ?? ''}
         initialDate={workout.date}
         exercises={editorExercises}
+        deleteSlot={<DeleteWorkoutButton workoutId={workoutId} />}
       >
         {/* Summary stats — sets, exercises, rating */}
         <div className="grid grid-cols-3 gap-3 mb-6">
@@ -139,10 +140,6 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
           ))}
         </div>
       </WorkoutEditor>
-
-      <div className="flex justify-center mt-2">
-        <DeleteWorkoutButton workoutId={workoutId} />
-      </div>
     </div>
   )
 }
