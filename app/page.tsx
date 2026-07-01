@@ -148,13 +148,16 @@ export default async function TodayPage() {
     ((w as any).workout_exercises ?? []).map((we: any) => ({ we, date: w.date }))
   )
 
+  const LEG_MUSCLES = new Set(['Quads', 'Hamstrings', 'Glutes', 'Calves'])
   const lastTrainedByMuscle: Record<string, string> = {}
   for (const { we, date } of allRecentWEs) {
     const muscles: string[] = (we.exercises as any)?.muscle_groups ?? []
     for (const muscle of muscles) {
       const primary = PRIMARY_MUSCLES.find(p =>
         muscle.toLowerCase().includes(p.toLowerCase()) ||
-        (p === 'Arms' && (muscle === 'Biceps' || muscle === 'Triceps'))
+        (p === 'Arms' && (muscle === 'Biceps' || muscle === 'Triceps')) ||
+        (p === 'Legs' && LEG_MUSCLES.has(muscle)) ||
+        (p === 'Shoulders' && muscle === 'Rear Delts')
       )
       if (primary && (!lastTrainedByMuscle[primary] || date > lastTrainedByMuscle[primary])) {
         lastTrainedByMuscle[primary] = date
