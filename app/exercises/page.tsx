@@ -22,6 +22,50 @@ const getCachedExercises = unstable_cache(
   { revalidate: 3600 }
 )
 
+function getCachedCompletionCounts(userId: string) {
+  return unstable_cache(
+    async () => {
+      const supabase = createAnonClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      )
+
+      const { data: cWks } = await supabase
+        .from('workouts')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('completed', true)
+
+      const cWkIds = (cWks ?? []).map((w: { id: string }) => w.id)
+      if (!cWkIds.length) return {} as Record<string, number>
+
+      const { data: cWEs } = await supabase
+        .from('workout_exercises')
+        .select('id, exercise_id')
+        .in('workout_id', cWkIds)
+
+      const cWeIds = (cWEs ?? []).map((we: { id: string }) => we.id)
+      if (!cWeIds.length) return {} as Record<string, number>
+
+      const { data: cSets } = await supabase
+        .from('sets')
+        .select('workout_exercise_id')
+        .in('workout_exercise_id', cWeIds)
+        .eq('completed', true)
+
+      const weWithSets = new Set((cSets ?? []).map((s: { workout_exercise_id: string }) => s.workout_exercise_id))
+      const counts: Record<string, number> = {}
+      for (const we of cWEs ?? []) {
+        if (weWithSets.has(we.id))
+          counts[we.exercise_id] = (counts[we.exercise_id] ?? 0) + 1
+      }
+      return counts
+    },
+    [`completion-counts-${userId}`],
+    { revalidate: 300 }
+  )()
+}
+
 const DIFFICULTY_LABEL: Record<string, string> = {
   beginner:     'Beginner',
   intermediate: 'Intermediate',
@@ -52,34 +96,18 @@ export default async function ExercisesPage({
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  // exercises served from 1-hour cache; user-specific data fetched fresh
-  const [exercises, { data: completedWks }, { data: favRows }] = await Promise.all([
+  // All three run in parallel: exercise list (1hr cache), favourites, completion counts (5min cache)
+  const [exercises, { data: favRows }, completionCount] = await Promise.all([
     getCachedExercises(),
-    supabase.from('workouts').select('id').eq('completed', true),
     user
       ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)
       : Promise.resolve({ data: null }),
+    user
+      ? getCachedCompletionCounts(user.id)
+      : Promise.resolve({} as Record<string, number>),
   ])
 
   const favouriteIds = new Set((favRows ?? []).map((f: { exercise_id: string }) => f.exercise_id))
-
-  // Completion counts per exercise
-  const cWkIds = (completedWks ?? []).map(w => w.id)
-  const { data: cWEs } = cWkIds.length
-    ? await supabase.from('workout_exercises').select('id, exercise_id').in('workout_id', cWkIds)
-    : { data: null }
-
-  const cWeIds = (cWEs ?? []).map(we => we.id)
-  const { data: cSets } = cWeIds.length
-    ? await supabase.from('sets').select('workout_exercise_id').in('workout_exercise_id', cWeIds).eq('completed', true)
-    : { data: null }
-
-  const weWithSets = new Set((cSets ?? []).map(s => s.workout_exercise_id))
-  const completionCount: Record<string, number> = {}
-  for (const we of cWEs ?? []) {
-    if (weWithSets.has(we.id))
-      completionCount[we.exercise_id] = (completionCount[we.exercise_id] ?? 0) + 1
-  }
 
   function getCompletionTier(exId: string): 'new' | 'novice' | 'experienced' {
     const c = completionCount[exId] ?? 0

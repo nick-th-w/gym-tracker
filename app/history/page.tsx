@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
 import { workoutColors } from '@/lib/workoutColors'
 
+export const revalidate = 60
+
 function parseDateParts(dateStr: string) {
   const [y, m, d] = dateStr.split('-').map(Number)
   const date = new Date(y, m - 1, d)

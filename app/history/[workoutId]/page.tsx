@@ -1,20 +1,12 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
-import { workoutColors } from '@/lib/workoutColors'
 import DeleteWorkoutButton from './DeleteWorkoutButton'
+import WorkoutEditor from './WorkoutEditor'
 
 function formatDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-}
-
-const RATING_META: Record<number, { label: string; colour: string }> = {
-  1: { label: 'Easy',  colour: 'text-success' },
-  2: { label: 'OK',    colour: 'text-success' },
-  3: { label: 'Right', colour: 'text-primary' },
-  4: { label: 'Tough', colour: 'text-orange-400' },
-  5: { label: 'Max',   colour: 'text-red-400' },
 }
 
 export default async function WorkoutDetailPage({ params }: { params: { workoutId: string } }) {
@@ -37,10 +29,10 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
 
   const [{ data: allSets }, { data: ratings }, { data: histWERows }] = await Promise.all([
     weIds.length
-      ? supabase.from('sets').select('workout_exercise_id, set_number, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true).order('set_number')
+      ? supabase.from('sets').select('id, workout_exercise_id, set_number, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true).order('set_number')
       : { data: null },
     exerciseIds.length
-      ? supabase.from('exercise_feedback').select('exercise_id, rating').eq('workout_id', workoutId)
+      ? supabase.from('exercise_feedback').select('id, exercise_id, rating').eq('workout_id', workoutId)
       : { data: null },
     exerciseIds.length
       ? supabase.from('workout_exercises').select('id, exercise_id, workout_id').in('exercise_id', exerciseIds).neq('workout_id', workoutId)
@@ -61,13 +53,17 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
     : { data: null }
 
   // Build maps
-  const setsByWE: Record<string, { set_number: number; weight_kg: number; reps: number }[]> = {}
+  const setsByWE: Record<string, { id: string; set_number: number; weight_kg: number; reps: number }[]> = {}
   for (const s of allSets ?? []) {
     (setsByWE[s.workout_exercise_id] ??= []).push(s)
   }
 
   const ratingByExercise: Record<string, number> = {}
-  for (const r of ratings ?? []) ratingByExercise[r.exercise_id] = r.rating
+  const ratingIdByExercise: Record<string, string> = {}
+  for (const r of ratings ?? []) {
+    ratingByExercise[r.exercise_id] = r.rating
+    ratingIdByExercise[r.exercise_id] = r.id
+  }
 
   const histWEToExercise: Record<string, string> = {}
   for (const we of histWERows ?? []) {
@@ -108,96 +104,49 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
   const ratedCount = ratings?.length ?? 0
   const totalSets = allSets?.length ?? 0
 
+  const editorExercises = (wes ?? []).map(we => {
+    const ex = we.exercises as any
+    const pbStatus = getPBStatus(we.exercise_id)
+    return {
+      weId: we.id,
+      exerciseId: we.exercise_id,
+      name: ex?.name ?? '',
+      muscleGroups: (ex?.muscle_groups ?? []) as string[],
+      rating: ratingByExercise[we.exercise_id] ?? null,
+      ratingId: ratingIdByExercise[we.exercise_id] ?? null,
+      pb: pbStatus === null ? 'none' as const : pbStatus === 'new' ? 'new' as const : pbStatus === 'pb' ? 'pb' as const : 'delta' as const,
+      pbDelta: typeof pbStatus === 'object' && pbStatus !== null ? pbStatus.delta : undefined,
+      sets: (setsByWE[we.id] ?? []).map(s => ({ id: s.id, set_number: s.set_number, weight_kg: s.weight_kg, reps: s.reps })),
+    }
+  })
+
   return (
     <div className="px-4 pt-8 pb-24">
       <Link href="/history" className="text-secondary-text text-sm mb-4 block">← History</Link>
 
-      {/* Coloured session header */}
-      <div className={`${workoutColors(workout.name).bg} ${workoutColors(workout.name).border} border rounded-2xl p-4 mb-6`}>
-        <h1 className="text-3xl font-bold text-white mb-1">{workout.name}</h1>
-        <p className="text-secondary-text text-sm">{formatDate(workout.date)}</p>
-      </div>
-
-      {/* Summary stats — sets, exercises, rating */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        {[
-          { label: 'Exercises', value: wes?.length ?? 0 },
-          { label: 'Sets done', value: totalSets },
-          { label: 'Rating', value: ratedCount > 0 ? `${totalRating}/${ratedCount * 5}` : '—' },
-        ].map(stat => (
-          <div key={stat.label} className="bg-card border border-border rounded-xl p-4 text-center">
-            <p className="text-secondary-text text-xs mb-1">{stat.label}</p>
-            <p className="text-white font-bold text-xl">{stat.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Exercise rows — 3 cards each */}
-      <div className="flex flex-col gap-3 mb-8">
-        {(wes ?? []).map(we => {
-          const ex = we.exercises as any
-          const sets = setsByWE[we.id] ?? []
-          const rating = ratingByExercise[we.exercise_id]
-          const ratingMeta = rating ? RATING_META[rating] : null
-          const pbStatus = getPBStatus(we.exercise_id)
-
-          return (
-            <div key={we.id} className="grid grid-cols-12 gap-2">
-
-              {/* Card 1: Exercise info — 6/12 */}
-              <div className="col-span-6 bg-card border border-border rounded-xl p-3 min-w-0">
-                <p className="text-white font-semibold text-sm leading-tight mb-1">{ex?.name}</p>
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {(ex?.muscle_groups ?? []).map((m: string) => (
-                    <span key={m} className="bg-primary/15 text-primary text-xs px-1.5 py-0.5 rounded-full">{m}</span>
-                  ))}
-                </div>
-                {sets.length > 0 ? sets.map(s => (
-                  <p key={s.set_number} className="text-secondary-text text-xs leading-relaxed">
-                    {s.set_number}. {s.weight_kg > 0 ? `${s.weight_kg}kg × ${s.reps}` : `${s.reps} reps`}
-                  </p>
-                )) : (
-                  <p className="text-secondary-text text-xs">No sets recorded</p>
-                )}
-              </div>
-
-              {/* Card 2: Rating — 3/12 */}
-              <div className="col-span-3 bg-card border border-border rounded-xl p-2 flex flex-col items-center justify-center text-center">
-                {ratingMeta ? (
-                  <>
-                    <p className={`text-xs font-bold leading-tight ${ratingMeta.colour}`}>{ratingMeta.label}</p>
-                    <p className="text-secondary-text text-xs">{rating}/5</p>
-                  </>
-                ) : (
-                  <p className="text-secondary-text text-xs">—</p>
-                )}
-              </div>
-
-              {/* Card 3: vs PB — 3/12 */}
-              <div className="col-span-3 bg-card border border-border rounded-xl p-2 flex flex-col items-center justify-center text-center gap-1">
-                {pbStatus === null && <p className="text-secondary-text text-xs">—</p>}
-                {pbStatus === 'new' && (
-                  <span className="bg-primary text-white text-xs px-2 py-0.5 rounded-full font-bold">NEW</span>
-                )}
-                {pbStatus === 'pb' && (
-                  <span className="bg-success text-white text-xs px-2 py-0.5 rounded-full font-bold">PB</span>
-                )}
-                {typeof pbStatus === 'object' && pbStatus !== null && (
-                  <>
-                    <p className="text-secondary-text text-xs font-medium">
-                      {pbStatus.delta === 0 ? 'Matched' : `−${pbStatus.delta}kg`}
-                    </p>
-                    <p className="text-secondary-text text-xs">vs PB</p>
-                  </>
-                )}
-              </div>
-
+      <WorkoutEditor
+        workoutId={workoutId}
+        initialName={workout.name ?? ''}
+        initialDate={workout.date}
+        exercises={editorExercises}
+        formatDate={formatDate}
+      >
+        {/* Summary stats — sets, exercises, rating */}
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          {[
+            { label: 'Exercises', value: wes?.length ?? 0 },
+            { label: 'Sets done', value: totalSets },
+            { label: 'Rating', value: ratedCount > 0 ? `${totalRating}/${ratedCount * 5}` : '—' },
+          ].map(stat => (
+            <div key={stat.label} className="bg-card border border-border rounded-xl p-4 text-center">
+              <p className="text-secondary-text text-xs mb-1">{stat.label}</p>
+              <p className="text-white font-bold text-xl">{stat.value}</p>
             </div>
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      </WorkoutEditor>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center mt-2">
         <DeleteWorkoutButton workoutId={workoutId} />
       </div>
     </div>
