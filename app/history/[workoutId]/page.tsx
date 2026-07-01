@@ -4,11 +4,6 @@ import { estimate1RM } from '@/lib/recommendation'
 import DeleteWorkoutButton from './DeleteWorkoutButton'
 import WorkoutEditor from './WorkoutEditor'
 
-function formatDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-}
-
 export default async function WorkoutDetailPage({ params }: { params: { workoutId: string } }) {
   const supabase = await createClient()
   const { workoutId } = params
@@ -129,7 +124,6 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
         initialName={workout.name ?? ''}
         initialDate={workout.date}
         exercises={editorExercises}
-        formatDate={formatDate}
       >
         {/* Summary stats — sets, exercises, rating */}
         <div className="grid grid-cols-3 gap-3 mb-6">

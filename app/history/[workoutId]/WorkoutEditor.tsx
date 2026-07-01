@@ -18,6 +18,11 @@ type EditExercise = {
   sets: EditSet[]
 }
 
+function formatDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 const RATING_META: Record<number, { label: string; colour: string }> = {
   1: { label: 'Easy',  colour: 'text-success' },
   2: { label: 'OK',    colour: 'text-success' },
@@ -31,14 +36,12 @@ export default function WorkoutEditor({
   initialName,
   initialDate,
   exercises,
-  formatDate,
   children,
 }: {
   workoutId: string
   initialName: string
   initialDate: string
   exercises: EditExercise[]
-  formatDate: (d: string) => string
   children: React.ReactNode
 }) {
   const router = useRouter()
