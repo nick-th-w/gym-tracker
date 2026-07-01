@@ -1,6 +1,4 @@
 import { createClient } from '@/lib/supabase/server'
-import { createClient as createAnonClient } from '@supabase/supabase-js'
-import { unstable_cache } from 'next/cache'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
 import { getStrengthRank, hasStandards, RANK_META } from '@/lib/strengthStandards'
@@ -13,50 +11,38 @@ interface CompletedWorkout { id: string; date: string }
 interface WorkoutExerciseRow { id: string; exercise_id: string; workout_id: string }
 interface SetRow { workout_exercise_id: string; weight_kg: number | null; reps: number | null }
 
-// Mirrors exercises/page.tsx's getCachedCompletionCounts — same waterfall shape
-// (workouts -> workout_exercises -> sets), cached per-user so the full history
-// scan doesn't re-run on every Progress tab visit.
-function getCachedProgressData(userId: string) {
-  return unstable_cache(
-    async () => {
-      const supabase = createAnonClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      )
+// Mirrors exercises/page.tsx's completion-counts waterfall shape
+// (workouts -> workout_exercises -> sets), using the request-scoped client.
+async function getProgressData(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<{ completedWorkouts: CompletedWorkout[]; allWEs: WorkoutExerciseRow[]; allSets: SetRow[] }> {
+  const { data: completedWorkouts } = await supabase
+    .from('workouts')
+    .select('id, date')
+    .eq('user_id', userId)
+    .eq('completed', true)
+    .order('date')
 
-      const { data: completedWorkouts } = await supabase
-        .from('workouts')
-        .select('id, date')
-        .eq('user_id', userId)
-        .eq('completed', true)
-        .order('date')
+  const workoutIds = (completedWorkouts ?? []).map((w: CompletedWorkout) => w.id)
+  if (!workoutIds.length) {
+    return { completedWorkouts: completedWorkouts ?? [], allWEs: [], allSets: [] }
+  }
 
-      const workoutIds = (completedWorkouts ?? []).map((w: CompletedWorkout) => w.id)
-      if (!workoutIds.length) {
-        return { completedWorkouts: completedWorkouts ?? [], allWEs: [] as WorkoutExerciseRow[], allSets: [] as SetRow[] }
-      }
+  const { data: allWEs } = await supabase
+    .from('workout_exercises')
+    .select('id, exercise_id, workout_id')
+    .in('workout_id', workoutIds)
 
-      const { data: allWEs } = await supabase
-        .from('workout_exercises')
-        .select('id, exercise_id, workout_id')
-        .in('workout_id', workoutIds)
+  const weIds = (allWEs ?? []).map((we: WorkoutExerciseRow) => we.id)
+  if (!weIds.length) {
+    return { completedWorkouts: completedWorkouts ?? [], allWEs: allWEs ?? [], allSets: [] }
+  }
 
-      const weIds = (allWEs ?? []).map((we: WorkoutExerciseRow) => we.id)
-      if (!weIds.length) {
-        return { completedWorkouts: completedWorkouts ?? [], allWEs: allWEs ?? [], allSets: [] as SetRow[] }
-      }
+  const { data: allSets } = await supabase
+    .from('sets')
+    .select('workout_exercise_id, weight_kg, reps')
+    .in('workout_exercise_id', weIds)
+    .eq('completed', true)
 
-      const { data: allSets } = await supabase
-        .from('sets')
-        .select('workout_exercise_id, weight_kg, reps')
-        .in('workout_exercise_id', weIds)
-        .eq('completed', true)
-
-      return { completedWorkouts: completedWorkouts ?? [], allWEs: allWEs ?? [], allSets: allSets ?? [] }
-    },
-    [`progress-data-${userId}`],
-    { revalidate: 300 }
-  )()
+  return { completedWorkouts: completedWorkouts ?? [], allWEs: allWEs ?? [], allSets: allSets ?? [] }
 }
 
 function fmtDate(dateStr: string): string {
@@ -100,26 +86,29 @@ function LineChart({ data }: { data: { label: string; value: number }[] }) {
   )
 }
 
-export default async function ProgressPage({ searchParams }: { searchParams?: { muscle?: string; exercise?: string } }) {
+export default async function ProgressPage({ searchParams }: { searchParams?: { muscle?: string; exercise?: string; favourite?: string } }) {
   const supabase = await createClient()
   const activeMuscle = searchParams?.muscle ?? null
   const activeExerciseId = searchParams?.exercise ?? null
+  const showFavourites = searchParams?.favourite === 'true'
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Profile + exercise list run live in parallel; the expensive workout/sets
-  // waterfall is cached per-user for 5 minutes (see getCachedProgressData above)
-  const [{ data: profileData }, { data: allExercises }, progressData] = await Promise.all([
+  const [{ data: profileData }, { data: allExercises }, progressData, { data: favRows }] = await Promise.all([
     user
       ? supabase.from('user_profiles').select('body_weight_kg, sex').eq('user_id', user.id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from('exercises').select('id, name, muscle_groups').order('name'),
     user
-      ? getCachedProgressData(user.id)
+      ? getProgressData(supabase, user.id)
       : Promise.resolve({ completedWorkouts: [] as CompletedWorkout[], allWEs: [] as WorkoutExerciseRow[], allSets: [] as SetRow[] }),
+    user
+      ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)
+      : Promise.resolve({ data: null }),
   ])
 
   const { completedWorkouts, allWEs, allSets } = progressData
+  const favouriteIds = new Set((favRows ?? []).map((f: { exercise_id: string }) => f.exercise_id))
 
   const profile = profileData as Pick<UserProfile, 'body_weight_kg' | 'sex'> | null
 
@@ -134,6 +123,10 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
   const dateByWorkout: Record<string, string> = {}
   for (const w of completedWorkouts) dateByWorkout[w.id] = w.date
 
+  // All completed sets (any weight, incl. bodyweight) — used to detect "was this exercise done"
+  const completedWEIds = new Set(allSets.map(s => s.workout_exercise_id))
+
+  // Weighted sets only — used for 1RM / PB calculations
   const setsByWE: Record<string, { weight_kg: number; reps: number }[]> = {}
   for (const s of allSets) {
     if (s.weight_kg && s.reps) (setsByWE[s.workout_exercise_id] ??= []).push({ weight_kg: s.weight_kg, reps: s.reps })
@@ -151,6 +144,18 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
         if (!pbByExercise[exId] || rm > pbByExercise[exId].rm)
           pbByExercise[exId] = { rm, weight: s.weight_kg, reps: s.reps }
       }
+    }
+  }
+
+  // Last completed date per exercise — any completed set counts, weighted or bodyweight
+  const lastCompletedByExercise: Record<string, string> = {}
+  for (const [exId, wes] of Object.entries(weByExercise)) {
+    for (const { weId, workoutId } of wes) {
+      if (!completedWEIds.has(weId)) continue
+      const date = dateByWorkout[workoutId]
+      if (!date) continue
+      if (!lastCompletedByExercise[exId] || date > lastCompletedByExercise[exId])
+        lastCompletedByExercise[exId] = date
     }
   }
 
@@ -175,7 +180,20 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
     allTimeBest = pbByExercise[activeExerciseId] ?? null
   }
 
-  const hasAnyData = Object.keys(pbByExercise).length > 0
+  const hasAnyData = Object.keys(lastCompletedByExercise).length > 0
+
+  // Build a /progress URL preserving whichever filters aren't being changed
+  function buildHref(overrides: { muscle?: string | null; exercise?: string | null; favourite?: boolean }) {
+    const p = new URLSearchParams()
+    const muscle = overrides.muscle !== undefined ? overrides.muscle : activeMuscle
+    const exercise = overrides.exercise !== undefined ? overrides.exercise : activeExerciseId
+    const favourite = overrides.favourite !== undefined ? overrides.favourite : showFavourites
+    if (muscle) p.set('muscle', muscle)
+    if (exercise) p.set('exercise', exercise)
+    if (favourite) p.set('favourite', 'true')
+    const str = p.toString()
+    return `/progress${str ? `?${str}` : ''}`
+  }
 
   return (
     <div className="px-4 pt-8 pb-6">
@@ -185,7 +203,7 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
       {/* Body part filter — all green */}
       <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
         <Link
-          href={activeExerciseId ? `/progress?exercise=${activeExerciseId}` : '/progress'}
+          href={buildHref({ muscle: null })}
           className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${!activeMuscle ? 'bg-success text-white' : 'bg-card text-secondary-text border border-border'}`}
         >
           All muscles
@@ -193,12 +211,18 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
         {allMuscles.map(m => (
           <Link
             key={m}
-            href={activeExerciseId ? `/progress?muscle=${encodeURIComponent(m)}&exercise=${activeExerciseId}` : `/progress?muscle=${encodeURIComponent(m)}`}
+            href={buildHref({ muscle: m })}
             className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${activeMuscle === m ? 'bg-success text-white' : 'bg-card text-secondary-text border border-border'}`}
           >
             {m}
           </Link>
         ))}
+        <Link
+          href={buildHref({ favourite: !showFavourites })}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${showFavourites ? 'bg-primary text-white' : 'bg-card text-secondary-text border border-border'}`}
+        >
+          ♥ Favourites
+        </Link>
       </div>
 
       {/* Exercise dropdown */}
@@ -259,30 +283,38 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
           </div>
         </div>
       ) : (
-        /* Overview — PBs list only */
+        /* Overview — every completed exercise, sorted by most recently done */
         <div className="flex flex-col gap-2">
-          {(allExercises ?? [])
+          {(() => {
+          const overviewExercises = (allExercises ?? [])
             .filter(e => {
-              if (!pbByExercise[e.id]) return false
-              if (activeMuscle) return (e.muscle_groups as string[]).includes(activeMuscle)
+              if (!lastCompletedByExercise[e.id]) return false
+              if (activeMuscle && !(e.muscle_groups as string[]).includes(activeMuscle)) return false
+              if (showFavourites && !favouriteIds.has(e.id)) return false
               return true
             })
-            .sort((a, b) => (pbByExercise[b.id]?.rm ?? 0) - (pbByExercise[a.id]?.rm ?? 0))
-            .map(e => {
+            .sort((a, b) => lastCompletedByExercise[b.id].localeCompare(lastCompletedByExercise[a.id]))
+
+          if (overviewExercises.length === 0) {
+            return <p className="text-secondary-text text-sm text-center pt-8">No exercises match these filters.</p>
+          }
+
+          return overviewExercises.map(e => {
               const pb = pbByExercise[e.id]
-              const rank = hasStandards(e.name) && profile?.body_weight_kg
+              const rank = pb && hasStandards(e.name) && profile?.body_weight_kg
                 ? getStrengthRank(e.name, pb.rm, profile.body_weight_kg, profile.sex ?? null)
                 : null
               const rankMeta = rank ? RANK_META[rank] : null
               return (
                 <Link
                   key={e.id}
-                  href={activeMuscle ? `/progress?muscle=${encodeURIComponent(activeMuscle)}&exercise=${e.id}` : `/progress?exercise=${e.id}`}
+                  href={buildHref({ exercise: e.id })}
                   className="bg-card border border-border rounded-xl p-4 flex items-center justify-between active:scale-[0.98] transition-transform"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-white text-sm font-medium">{e.name}</p>
+                      {favouriteIds.has(e.id) && <span className="text-primary text-xs">♥</span>}
                       {rankMeta && (
                         <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${rankMeta.bg} ${rankMeta.colour}`}>
                           {rankMeta.label}
@@ -294,15 +326,22 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
                         <span key={m} className="bg-primary/15 text-primary text-xs px-1.5 py-0.5 rounded-full">{m}</span>
                       ))}
                     </div>
+                    <p className="text-secondary-text text-xs mt-1">Last done {fmtDate(lastCompletedByExercise[e.id])}</p>
                   </div>
                   <div className="text-right shrink-0 ml-3">
-                    <p className="text-white font-bold">{pb.weight}kg × {pb.reps}</p>
-                    <p className="text-secondary-text text-xs">{Math.round(pb.rm)}kg 1RM</p>
+                    {pb ? (
+                      <>
+                        <p className="text-white font-bold">{pb.weight}kg × {pb.reps}</p>
+                        <p className="text-secondary-text text-xs">{Math.round(pb.rm)}kg 1RM</p>
+                      </>
+                    ) : (
+                      <p className="text-secondary-text text-xs">Bodyweight</p>
+                    )}
                   </div>
                 </Link>
               )
             })
-          }
+          })()}
         </div>
       )}
     </div>

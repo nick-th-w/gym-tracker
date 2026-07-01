@@ -15,96 +15,10 @@ function parseDateParts(dateStr: string) {
   }
 }
 
-function fmtShort(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-}
-
 function getDayKey(offsetFromToday: number): string {
   const d = new Date()
   d.setDate(d.getDate() - offsetFromToday)
   return d.toISOString().split('T')[0]
-}
-
-// ─── Dual-axis chart: daily bars (green) + cumulative line (orange) ──────────
-function WorkoutChart({ data }: { data: { date: string; count: number; cumulative: number }[] }) {
-  if (!data.some(d => d.count > 0)) return (
-    <div className="h-28 flex items-center justify-center">
-      <p className="text-secondary-text text-sm">No workouts in this period</p>
-    </div>
-  )
-
-  const W = 340, H = 130
-  const P = { t: 16, r: 36, b: 22, l: 24 }
-  const cW = W - P.l - P.r
-  const cH = H - P.t - P.b
-  const n = data.length
-  const slotW = cW / n
-  const bW = Math.max(1.5, slotW - 0.8)
-
-  const maxCount = Math.max(...data.map(d => d.count), 1)
-  const maxCum = Math.max(...data.map(d => d.cumulative), 1)
-
-  const bX = (i: number) => P.l + i * slotW + (slotW - bW) / 2
-  const barH = (c: number) => (c / maxCount) * cH
-  const lineY = (cum: number) => P.t + cH - (cum / maxCum) * cH
-
-  const linePath = data
-    .map((d, i) => `${i === 0 ? 'M' : 'L'}${bX(i) + bW / 2},${lineY(d.cumulative)}`)
-    .join(' ')
-
-  // Show ~5 evenly spaced x-axis labels
-  const labelStep = Math.max(1, Math.floor(n / 5))
-  const labelIdxs = Array.from({ length: Math.ceil(n / labelStep) }, (_, i) => i * labelStep)
-    .filter(i => i < n)
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {/* Horizontal guide line at half cumulative */}
-      <line x1={P.l} y1={lineY(maxCum / 2)} x2={W - P.r} y2={lineY(maxCum / 2)} stroke="#525254" strokeWidth="0.4" strokeDasharray="3,3" />
-
-      {/* Daily bars */}
-      {data.map((d, i) => (
-        d.count > 0 && (
-          <rect
-            key={i}
-            x={bX(i)}
-            y={P.t + cH - barH(d.count)}
-            width={bW}
-            height={barH(d.count)}
-            fill="#8cc63f"
-            fillOpacity="0.85"
-            rx="0.5"
-          />
-        )
-      ))}
-
-      {/* Cumulative line */}
-      <path d={linePath} fill="none" stroke="#ff5500" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      {/* Line end dot */}
-      <circle
-        cx={bX(n - 1) + bW / 2}
-        cy={lineY(data[n - 1].cumulative)}
-        r="2.5"
-        fill="#ff5500"
-      />
-
-      {/* Left Y axis — daily count */}
-      <text x={P.l - 3} y={P.t + cH} textAnchor="end" fill="#8cc63f" fontSize="6.5">0</text>
-      <text x={P.l - 3} y={P.t + 4} textAnchor="end" fill="#8cc63f" fontSize="6.5">{maxCount}</text>
-
-      {/* Right Y axis — cumulative */}
-      <text x={W - P.r + 4} y={P.t + cH} textAnchor="start" fill="#ff5500" fontSize="6.5">0</text>
-      <text x={W - P.r + 4} y={P.t + 4} textAnchor="start" fill="#ff5500" fontSize="6.5">{maxCum}</text>
-
-      {/* X axis labels */}
-      {labelIdxs.map(i => (
-        <text key={i} x={bX(i) + bW / 2} y={H - 3} textAnchor="middle" fill="#8e8e93" fontSize="6.5">
-          {fmtShort(data[i].date)}
-        </text>
-      ))}
-    </svg>
-  )
 }
 
 const RANGES = [
@@ -201,23 +115,6 @@ export default async function HistoryPage({
   const periodWorkouts = filtered.length
   const periodExercises = filtered.reduce((sum, w) => sum + (completedCountByWorkout[w.id] ?? 0), 0)
 
-  // ── Daily chart data (90 days default) ───────────────────────────────────
-  const chartDays = activeRange === 'all' ? 90 : parseInt(activeRange)
-
-  const workoutsByDay: Record<string, number> = {}
-  for (const w of workouts) {
-    if (activeFilter && w.name !== activeFilter) continue
-    workoutsByDay[w.date] = (workoutsByDay[w.date] ?? 0) + 1
-  }
-
-  let cumulative = 0
-  const chartData = Array.from({ length: chartDays }, (_, i) => {
-    const date = getDayKey(chartDays - 1 - i)
-    const count = workoutsByDay[date] ?? 0
-    cumulative += count
-    return { date, count, cumulative }
-  })
-
   // Helper to build href preserving both filter params
   function href(params: Record<string, string | null>) {
     const p = new URLSearchParams()
@@ -267,18 +164,6 @@ export default async function HistoryPage({
           <p className="text-white font-bold text-2xl">{periodExercises}</p>
           <p className="text-secondary-text text-xs mt-0.5">in this period</p>
         </div>
-      </div>
-
-      {/* ── Chart — daily bars + cumulative line (filtered) ─────────────── */}
-      <div className="bg-card border border-border rounded-xl p-4 mb-5">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-secondary-text text-xs uppercase tracking-wide">Workout frequency</p>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1 text-xs text-success"><span className="inline-block w-2.5 h-2.5 rounded-sm bg-success/80"></span> Daily</span>
-            <span className="flex items-center gap-1 text-xs text-primary"><span className="inline-block w-3 h-0.5 bg-primary"></span> Cumulative</span>
-          </div>
-        </div>
-        <WorkoutChart data={chartData} />
       </div>
 
       {/* ── Workout cards ─────────────────────────────────────────────────── */}

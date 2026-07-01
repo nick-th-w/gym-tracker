@@ -184,7 +184,10 @@ export default async function TodayPage() {
 
       {/* ── Last session callout ─────────────────────────────────────────── */}
       {lastWorkout && (
-        <div className="bg-card border border-border rounded-2xl px-4 py-3 flex items-center justify-between">
+        <Link
+          href={`/history/${lastWorkout.id}`}
+          className="bg-card border border-border rounded-2xl px-4 py-3 flex items-center justify-between active:scale-[0.98] transition-transform"
+        >
           <div className="min-w-0">
             <p className="text-secondary-text text-xs uppercase tracking-wide mb-0.5">Last session</p>
             <p className="text-white text-sm font-medium truncate">{lastWorkout.name}</p>
@@ -199,7 +202,7 @@ export default async function TodayPage() {
               </p>
             )}
           </div>
-        </div>
+        </Link>
       )}
 
       {/* ── Muscle readiness ─────────────────────────────────────────────── */}
