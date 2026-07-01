@@ -57,6 +57,11 @@ type RawExercise = {
   images: string[]
 }
 
+/** Normalise a name for deduplication: lowercase, collapse spaces, strip trailing 's'. */
+function normaliseName(name: string): string {
+  return name.toLowerCase().trim().replace(/\s+/g, ' ').replace(/s$/, '')
+}
+
 export async function GET() {
   // 1. Fetch the full exercise dataset from the open-source repo
   let raw: RawExercise[]
@@ -70,13 +75,13 @@ export async function GET() {
     return NextResponse.json({ error: 'Failed to fetch exercise data', detail: String(err) }, { status: 500 })
   }
 
-  // 2. Get existing names to skip duplicates
+  // 2. Get existing names to skip duplicates (normalised for fuzzy match)
   const { data: existing } = await supabase.from('exercises').select('name')
-  const existingNames = new Set((existing ?? []).map((e: any) => e.name.toLowerCase()))
+  const existingNorms = new Set((existing ?? []).map((e: any) => normaliseName(e.name)))
 
   // 3. Map and filter
   const toInsert = raw
-    .filter(e => !existingNames.has(e.name.toLowerCase()))
+    .filter(e => !existingNorms.has(normaliseName(e.name)))
     .map(e => {
       // Merge primary + secondary, deduplicate, normalise names
       const muscles = [...new Set(
