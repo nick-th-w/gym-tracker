@@ -4,6 +4,7 @@ import { estimate1RM } from '@/lib/recommendation'
 import { getStrengthRank, RANK_META } from '@/lib/strengthStandards'
 import type { UserProfile } from '@/lib/types'
 import FavouriteButton from '../FavouriteButton'
+import QuickStartButton from '../QuickStartButton'
 
 function fmtDate(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -235,24 +236,10 @@ export default async function ExerciseDetailPage({ params }: { params: { exercis
       ) : (
         <div className="bg-card border border-border rounded-xl p-6 text-center">
           <p className="text-secondary-text text-sm mb-3">No performance data yet</p>
-          <Link
-            href="/workout"
-            className="bg-success text-white text-sm font-semibold px-5 py-2.5 rounded-xl inline-block"
-          >
-            Start a workout
-          </Link>
+          <QuickStartButton />
         </div>
       )}
 
-      {/* CTA */}
-      <div className="mt-5">
-        <Link
-          href="/workout/custom"
-          className="w-full border border-dashed border-border rounded-xl py-3 text-secondary-text text-sm text-center block active:scale-[0.98] transition-transform"
-        >
-          + Add to a custom workout
-        </Link>
-      </div>
     </div>
   )
 }

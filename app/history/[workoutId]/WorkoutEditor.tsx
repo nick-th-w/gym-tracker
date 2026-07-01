@@ -38,6 +38,7 @@ export default function WorkoutEditor({
   initialDate,
   exercises,
   deleteSlot,
+  saveSlot,
   children,
 }: {
   workoutId: string
@@ -45,6 +46,7 @@ export default function WorkoutEditor({
   initialDate: string
   exercises: EditExercise[]
   deleteSlot: React.ReactNode
+  saveSlot: React.ReactNode
   children: React.ReactNode
 }) {
   const router = useRouter()
@@ -190,10 +192,13 @@ export default function WorkoutEditor({
             />
           </div>
         ) : (
-          <>
-            <h1 className="text-3xl font-bold text-white mb-1">{name || 'Workout'}</h1>
-            <p className="text-secondary-text text-sm">{formatDate(date)}</p>
-          </>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-1">{name || 'Workout'}</h1>
+              <p className="text-secondary-text text-sm">{formatDate(date)}</p>
+            </div>
+            {saveSlot}
+          </div>
         )}
       </div>
 
@@ -317,25 +322,23 @@ export default function WorkoutEditor({
       </div>
 
       {/* Bottom action tiles */}
-      <div className="grid grid-cols-2 gap-3">
-        {editing ? (
-          <>
-            <button onClick={cancel} disabled={saving} className="bg-card border border-border rounded-xl py-3 text-secondary-text text-sm font-medium disabled:opacity-60 active:scale-[0.98] transition-transform">
-              Cancel
-            </button>
-            <button onClick={save} disabled={saving} className="bg-success rounded-xl py-3 text-white text-sm font-semibold disabled:opacity-60 active:scale-[0.98] transition-transform">
-              {saving ? 'Saving...' : 'Save changes'}
-            </button>
-          </>
-        ) : (
-          <>
-            <button onClick={() => setEditing(true)} className="bg-card border border-border rounded-xl py-3 text-white text-sm font-medium active:scale-[0.98] transition-transform">
-              Edit workout
-            </button>
-            {deleteSlot}
-          </>
-        )}
-      </div>
+      {editing ? (
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={cancel} disabled={saving} className="bg-card border border-border rounded-xl py-3 text-secondary-text text-sm font-medium disabled:opacity-60 active:scale-[0.98] transition-transform">
+            Cancel
+          </button>
+          <button onClick={save} disabled={saving} className="bg-success rounded-xl py-3 text-white text-sm font-semibold disabled:opacity-60 active:scale-[0.98] transition-transform">
+            {saving ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => setEditing(true)} className="bg-card border border-border rounded-xl py-3 text-white text-sm font-medium active:scale-[0.98] transition-transform">
+            Edit workout
+          </button>
+          {deleteSlot}
+        </div>
+      )}
 
       {/* Swap-exercise bottom sheet */}
       {swapOpenFor && (

@@ -1,8 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAnonClient } from '@supabase/supabase-js'
 import { unstable_cache } from 'next/cache'
-import Link from 'next/link'
-import { workoutColors } from '@/lib/workoutColors'
+import WorkoutTabs from './WorkoutTabs'
 
 const getCachedTemplates = unstable_cache(
   async () => {
@@ -20,19 +19,6 @@ const getCachedTemplates = unstable_cache(
   { revalidate: 3600 }
 )
 
-const MUSCLE_MAP: Record<string, string[]> = {
-  full_body_a:    ['Chest', 'Back', 'Legs', 'Shoulders', 'Core'],
-  full_body_b:    ['Back', 'Hamstrings', 'Chest', 'Core'],
-  upper:          ['Chest', 'Back', 'Shoulders', 'Arms'],
-  lower:          ['Quads', 'Hamstrings', 'Glutes', 'Calves'],
-  recovery:       ['Core', 'Mobility', 'Full Body'],
-  back_biceps:    ['Back', 'Lats', 'Biceps'],
-  chest_triceps:  ['Chest', 'Shoulders', 'Triceps'],
-  shoulders_arms: ['Shoulders', 'Biceps', 'Triceps'],
-  legs_glutes:    ['Quads', 'Glutes', 'Hamstrings', 'Calves'],
-  core_mobility:  ['Core', 'Hip Flexors', 'Stability'],
-}
-
 const NEXT_SESSION: Record<string, string> = {
   'Full Body A':     'Full Body B',
   'Full Body B':     'Back & Biceps',
@@ -48,8 +34,9 @@ const NEXT_SESSION: Record<string, string> = {
 
 export default async function ChooseWorkoutPage() {
   const supabase = await createClient()
-  const [allTemplates, { data: lastWorkout }] = await Promise.all([
+  const [allTemplates, { data: { user } }, { data: lastWorkout }] = await Promise.all([
     getCachedTemplates(),
+    supabase.auth.getUser(),
     supabase.from('workouts').select('name').eq('completed', true).order('date', { ascending: false }).limit(1).maybeSingle(),
   ])
 
@@ -60,6 +47,43 @@ export default async function ChooseWorkoutPage() {
   const standardTemplates = (allTemplates ?? []).filter(t => t.focus !== 'custom_saved')
   const savedTemplates    = (allTemplates ?? []).filter(t => t.focus === 'custom_saved')
 
+  // Fetch user's saved workouts with exercise names
+  type SavedWorkout = { id: string; name: string; date: string; exercise_names: string[] }
+  let savedWorkouts: SavedWorkout[] = []
+  if (user) {
+    const { data: rawSaved } = await supabase
+      .from('workouts')
+      .select('id, name, date')
+      .eq('user_id', user.id)
+      .eq('is_saved', true)
+      .eq('completed', true)
+      .order('date', { ascending: false })
+
+    if (rawSaved?.length) {
+      const ids = rawSaved.map(w => w.id)
+      const { data: weRows } = await supabase
+        .from('workout_exercises')
+        .select('workout_id, exercises(name)')
+        .in('workout_id', ids)
+        .order('order_index')
+
+      const namesByWorkout: Record<string, string[]> = {}
+      for (const we of weRows ?? []) {
+        const ex = we.exercises as any
+        if (ex?.name) {
+          ;(namesByWorkout[we.workout_id] ??= []).push(ex.name)
+        }
+      }
+
+      savedWorkouts = rawSaved.map(w => ({
+        id: w.id,
+        name: w.name ?? 'Workout',
+        date: w.date,
+        exercise_names: namesByWorkout[w.id] ?? [],
+      }))
+    }
+  }
+
   return (
     <div className="px-4 pt-8 pb-6">
       <h1 className="text-3xl font-bold text-white mb-1">Choose your session</h1>
@@ -69,75 +93,12 @@ export default async function ChooseWorkoutPage() {
         <p className="text-secondary-text text-sm mb-6">What are we hitting today?</p>
       )}
 
-      {/* Standard templates */}
-      <div className="flex flex-col gap-3">
-        {standardTemplates.map(t => {
-          const colors = workoutColors(t.focus)
-          const isRecommended = t.name === recommendedName
-          return (
-            <Link
-              key={t.id}
-              href={`/workout/${t.id}`}
-              className={`${colors.bg} ${colors.border} border rounded-2xl p-4 active:scale-[0.98] transition-transform relative`}
-            >
-              {isRecommended && (
-                <span className="absolute top-3 right-3 bg-success text-white text-xs px-2 py-0.5 rounded-full font-semibold">
-                  Recommended
-                </span>
-              )}
-              <div className="flex items-start justify-between mb-1 pr-28">
-                <h2 className="text-white font-semibold text-lg">{t.name}</h2>
-                <span className="text-secondary-text text-sm shrink-0 ml-2">~{t.estimated_duration_minutes} min</span>
-              </div>
-              <p className="text-secondary-text text-sm mb-3 leading-relaxed">{t.description}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(t.goals ?? []).map((g: string) => (
-                  <span key={g} className="bg-success/15 text-success text-xs px-2.5 py-1 rounded-full font-medium">{g}</span>
-                ))}
-                {(MUSCLE_MAP[t.focus] ?? []).filter((m: string) => !(t.goals ?? []).includes(m)).map((m: string) => (
-                  <span key={m} className="bg-primary/15 text-primary text-xs px-2.5 py-1 rounded-full">{m}</span>
-                ))}
-              </div>
-            </Link>
-          )
-        })}
-      </div>
-
-      {/* Saved custom workouts */}
-      {savedTemplates.length > 0 && (
-        <div className="mt-6">
-          <p className="text-secondary-text text-xs uppercase tracking-wide mb-3">Saved custom workouts</p>
-          <div className="flex flex-col gap-3">
-            {savedTemplates.map(t => {
-              const colors = workoutColors('custom_saved')
-              return (
-                <Link
-                  key={t.id}
-                  href={`/workout/${t.id}`}
-                  className={`${colors.bg} ${colors.border} border rounded-2xl p-4 active:scale-[0.98] transition-transform`}
-                >
-                  <div className="flex items-start justify-between mb-1">
-                    <h2 className="text-white font-semibold">{t.name}</h2>
-                    <span className="text-secondary-text text-sm shrink-0 ml-2">~{t.estimated_duration_minutes ?? 35} min</span>
-                  </div>
-                  <p className="text-secondary-text text-xs">Custom · {(t.goals ?? []).join(', ')}</p>
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Custom builder */}
-      <div className="mt-4">
-        <Link
-          href="/workout/custom"
-          className="flex items-center justify-center gap-2 border-2 border-dashed border-border rounded-2xl p-4 text-secondary-text text-sm active:scale-[0.98] transition-transform hover:border-rose-500/50 hover:text-rose-400"
-        >
-          <span className="text-xl font-light">+</span>
-          <span>Build a custom workout</span>
-        </Link>
-      </div>
+      <WorkoutTabs
+        standardTemplates={standardTemplates}
+        savedTemplates={savedTemplates}
+        savedWorkouts={savedWorkouts}
+        recommendedName={recommendedName}
+      />
     </div>
   )
 }

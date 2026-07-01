@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import { estimate1RM } from '@/lib/recommendation'
 import DeleteWorkoutButton from './DeleteWorkoutButton'
+import SaveWorkoutButton from './SaveWorkoutButton'
 import WorkoutEditor from './WorkoutEditor'
 
 export default async function WorkoutDetailPage({ params }: { params: { workoutId: string } }) {
@@ -9,7 +10,7 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
   const { workoutId } = params
 
   const { data: workout } = await supabase
-    .from('workouts').select('id, name, date, duration_minutes').eq('id', workoutId).single()
+    .from('workouts').select('id, name, date, duration_minutes, is_saved').eq('id', workoutId).single()
 
   if (!workout) return <div className="px-4 pt-8"><p className="text-secondary-text">Workout not found.</p></div>
 
@@ -125,6 +126,7 @@ export default async function WorkoutDetailPage({ params }: { params: { workoutI
         initialDate={workout.date}
         exercises={editorExercises}
         deleteSlot={<DeleteWorkoutButton workoutId={workoutId} />}
+        saveSlot={<SaveWorkoutButton workoutId={workoutId} initialSaved={!!(workout as any).is_saved} />}
       >
         {/* Summary stats — sets, exercises, rating */}
         <div className="grid grid-cols-3 gap-3 mb-6">

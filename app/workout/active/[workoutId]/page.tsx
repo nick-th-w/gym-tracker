@@ -15,6 +15,10 @@ type Session = {
   priorSets: PriorSet[]; recWeight: number; recNote: string
   sets: SetLog[]; rated: boolean
 }
+type ExercisePick = {
+  id: string; name: string; muscle_groups: string[]; equipment: string
+  difficulty: string; tips: string; video_url: string | null; is_favourite: boolean
+}
 
 export default function ActiveWorkoutPage() {
   const { workoutId } = useParams<{ workoutId: string }>()
@@ -32,6 +36,17 @@ export default function ActiveWorkoutPage() {
   const [celebrating, setCelebrating] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [tipsOpen, setTipsOpen] = useState(true)
+
+  // Picker state
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerSearch, setPickerSearch] = useState('')
+  const [pickerDifficulty, setPickerDifficulty] = useState<string | null>(null)
+  const [pickerEquipment, setPickerEquipment] = useState<string | null>(null)
+  const [pickerMuscle, setPickerMuscle] = useState<string | null>(null)
+  const [pickerFavOnly, setPickerFavOnly] = useState(false)
+  const [allExercises, setAllExercises] = useState<ExercisePick[] | null>(null)
+  const [addingExercise, setAddingExercise] = useState(false)
+  const [showNextOptions, setShowNextOptions] = useState(false)
 
   useEffect(() => {
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
@@ -61,7 +76,10 @@ export default function ActiveWorkoutPage() {
         .eq('workout_id', workoutId)
         .order('order_index')
 
-      if (!wes?.length) return
+      if (!wes?.length) {
+        setLoading(false)
+        return
+      }
 
       const exerciseIds = wes.map(we => we.exercise_id)
 
@@ -123,7 +141,128 @@ export default function ActiveWorkoutPage() {
     load()
   }, [workoutId])
 
+  async function openPicker() {
+    setPickerOpen(true)
+    setPickerSearch('')
+    setPickerDifficulty(null)
+    setPickerEquipment(null)
+    setPickerMuscle(null)
+    setPickerFavOnly(false)
+    if (allExercises) return
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    const [{ data: exs }, { data: favRows }] = await Promise.all([
+      supabase.from('exercises').select('id, name, muscle_groups, equipment, difficulty, tips, video_url').order('name'),
+      user
+        ? supabase.from('user_exercise_favourites').select('exercise_id').eq('user_id', user.id)
+        : Promise.resolve({ data: null }),
+    ])
+    const favSet = new Set((favRows ?? []).map((f: { exercise_id: string }) => f.exercise_id))
+    setAllExercises((exs ?? []).map(e => ({ ...e, is_favourite: favSet.has(e.id) })) as ExercisePick[])
+  }
+
+  async function addExercise(ex: ExercisePick) {
+    setAddingExercise(true)
+    const supabase = createClient()
+    const orderIndex = sessions.length
+
+    const { data: we } = await supabase
+      .from('workout_exercises')
+      .insert({
+        workout_id: workoutId,
+        exercise_id: ex.id,
+        order_index: orderIndex,
+        target_sets: 3,
+        target_reps_min: 8,
+        target_reps_max: 10,
+        goal_type: 'hypertrophy',
+        reps_unit: 'reps',
+      })
+      .select('id').single()
+
+    if (!we) { setAddingExercise(false); return }
+
+    // Fetch prior sets for this exercise
+    const { data: pastWEs } = await supabase
+      .from('workout_exercises')
+      .select('id, workout_id')
+      .eq('exercise_id', ex.id)
+      .neq('workout_id', workoutId)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    const pastWorkoutIds = [...new Set((pastWEs ?? []).map(w => w.workout_id))]
+    const { data: doneWkts } = pastWorkoutIds.length
+      ? await supabase.from('workouts').select('id').in('id', pastWorkoutIds).eq('completed', true)
+      : { data: null }
+
+    const doneIds = new Set((doneWkts ?? []).map(w => w.id))
+    const lastWE = (pastWEs ?? []).find(w => doneIds.has(w.workout_id))
+    const { data: priorSetsRaw } = lastWE
+      ? await supabase.from('sets').select('set_number, weight_kg, reps').eq('workout_exercise_id', lastWE.id).eq('completed', true).order('set_number')
+      : { data: null }
+
+    const priorSets: PriorSet[] = (priorSetsRaw ?? []).filter(s => s.weight_kg != null && s.reps != null) as PriorSet[]
+
+    const { data: lastRatingRow } = await supabase
+      .from('exercise_feedback')
+      .select('rating')
+      .eq('exercise_id', ex.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const rec = getRecommendation(priorSets, lastRatingRow?.rating ?? null, 8, 10, 'hypertrophy', ex.name, profile)
+
+    const newSession: Session = {
+      weId: we.id,
+      exerciseId: ex.id,
+      name: ex.name,
+      muscleGroups: ex.muscle_groups,
+      equipment: ex.equipment,
+      tips: ex.tips ?? '',
+      videoUrl: ex.video_url ?? '',
+      targetSets: 3,
+      targetRepsMin: 8,
+      targetRepsMax: 10,
+      goalType: 'hypertrophy',
+      repsUnit: 'reps',
+      priorSets,
+      recWeight: rec.weight_kg,
+      recNote: rec.note,
+      sets: Array.from({ length: 3 }, (_, i) => ({
+        set_number: i + 1, weight_kg: rec.weight_kg, reps: 8, completed: false,
+      })),
+      rated: false,
+    }
+
+    setSessions(prev => {
+      const next = [...prev, newSession]
+      setIdx(next.length - 1)
+      return next
+    })
+    setPickerOpen(false)
+    setAddingExercise(false)
+  }
+
   const cur = sessions[idx]
+
+  const workedMuscles = [...new Set(sessions.flatMap(s => s.muscleGroups))]
+  const unworkedMuscles = allExercises
+    ? [...new Set((allExercises ?? []).flatMap(e => e.muscle_groups))].filter(m => !workedMuscles.includes(m))
+    : []
+
+  const allEquipment = allExercises ? [...new Set(allExercises.map(e => e.equipment))].sort() : []
+  const allMuscleOptions = allExercises ? [...new Set(allExercises.flatMap(e => e.muscle_groups))].sort() : []
+
+  const pickerFiltered = (allExercises ?? []).filter(e => {
+    if (pickerFavOnly && !e.is_favourite) return false
+    if (pickerDifficulty && e.difficulty !== pickerDifficulty) return false
+    if (pickerEquipment && e.equipment !== pickerEquipment) return false
+    if (pickerMuscle && !e.muscle_groups.includes(pickerMuscle)) return false
+    if (pickerSearch && !e.name.toLowerCase().includes(pickerSearch.toLowerCase())) return false
+    return true
+  })
 
   function updateSet(si: number, field: 'weight_kg' | 'reps', val: number) {
     setSessions(prev => prev.map((s, i) => i !== idx ? s : {
@@ -138,6 +277,7 @@ export default function ActiveWorkoutPage() {
   }
 
   function addSet() {
+    if (!cur) return
     setSessions(prev => prev.map((s, i) => i !== idx ? s : {
       ...s, sets: [...s.sets, { set_number: s.sets.length + 1, weight_kg: cur.recWeight, reps: cur.targetRepsMin, completed: false }],
     }))
@@ -169,6 +309,9 @@ export default function ActiveWorkoutPage() {
       await finishWorkout()
     } else if (idx < sessions.length - 1) {
       setIdx(i => i + 1)
+    } else {
+      // Last (or only) exercise just rated — show next-options screen
+      setShowNextOptions(true)
     }
   }
 
@@ -183,19 +326,17 @@ export default function ActiveWorkoutPage() {
   }
 
   function handleFinishTap() {
-    if (!cur.rated) {
-      setShowFinishModal(false)
-      setPendingFinish(true)
-      setShowRatingModal(true)
-    } else {
+    // If no exercises or current is already rated, finish immediately
+    if (sessions.length === 0 || cur?.rated) {
       finishWorkout()
+      return
     }
+    setShowFinishModal(false)
+    setPendingFinish(true)
+    setShowRatingModal(true)
   }
 
   if (loading) return <div className="px-4 pt-8"><p className="text-secondary-text">Loading workout...</p></div>
-  if (!cur) return null
-
-  const isBodyweight = cur.equipment === 'Bodyweight' || cur.equipment === 'Resistance Band'
 
   if (celebrating) {
     return (
@@ -207,13 +348,13 @@ export default function ActiveWorkoutPage() {
     )
   }
 
-  return (
-    <div className="px-4 pt-8 pb-32">
-      {/* Progress circles — ✓ when rated, clickable to jump */}
+  // Shared header (timer, progress circles, finish link, add button, muscles strip)
+  const header = (
+    <div className="mb-6">
       <div className="flex items-center justify-between mb-2">
         <span className="text-secondary-text text-sm">
-          {idx + 1} of {sessions.length}
-          <span className="ml-2 text-secondary-text">
+          {sessions.length > 0 ? `${idx + 1} of ${sessions.length}` : 'Quick start'}
+          <span className="ml-2">
             {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
           </span>
         </span>
@@ -235,9 +376,205 @@ export default function ActiveWorkoutPage() {
           ))}
         </div>
       </div>
-      <button onClick={() => setShowFinishModal(true)} className="text-secondary-text text-xs text-right w-full mb-6 underline underline-offset-2">
-        Finish workout
-      </button>
+
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={openPicker} className="text-rose-400 text-xs font-medium">
+          + Add exercise
+        </button>
+        <button onClick={() => setShowFinishModal(true)} className="text-secondary-text text-xs underline underline-offset-2">
+          Finish workout
+        </button>
+      </div>
+
+      {workedMuscles.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {workedMuscles.map(m => (
+            <span key={m} className="bg-rose-600/15 text-rose-400 text-xs px-2.5 py-1 rounded-full">{m}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  // Picker bottom sheet
+  const picker = pickerOpen && (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setPickerOpen(false)}>
+      <div className="bg-card w-full rounded-t-3xl p-5 pb-10 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4 shrink-0" />
+        <h2 className="text-lg font-bold text-white mb-3 shrink-0">Add exercise</h2>
+
+        {/* Muscle suggestions */}
+        {workedMuscles.length > 0 && unworkedMuscles.length > 0 && (
+          <div className="mb-3 shrink-0">
+            <p className="text-secondary-text text-xs mb-1.5">Not yet worked</p>
+            <div className="flex flex-wrap gap-1.5">
+              {unworkedMuscles.slice(0, 6).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setPickerSearch(m)}
+                  className="bg-rose-600/15 text-rose-400 text-xs px-2.5 py-1 rounded-full"
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <input
+          type="search"
+          placeholder="Search exercises..."
+          value={pickerSearch}
+          onChange={e => setPickerSearch(e.target.value)}
+          className="w-full bg-border text-white text-sm rounded-xl px-4 py-3 mb-3 placeholder:text-secondary-text shrink-0"
+          autoFocus
+        />
+
+        <div className="flex gap-1.5 flex-wrap mb-2 shrink-0">
+          <button
+            onClick={() => setPickerFavOnly(f => !f)}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${pickerFavOnly ? 'bg-primary text-white' : 'bg-border text-secondary-text'}`}
+          >
+            <svg viewBox="0 0 24 24" className={`w-3 h-3 ${pickerFavOnly ? 'fill-white' : 'fill-none stroke-current'}`} strokeWidth="2">
+              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+            </svg>
+            Favourites
+          </button>
+          {['beginner', 'intermediate', 'difficult'].map(d => (
+            <button
+              key={d}
+              onClick={() => setPickerDifficulty(pickerDifficulty === d ? null : d)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${pickerDifficulty === d ? 'bg-success text-white' : 'bg-border text-secondary-text'}`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+
+        {/* Equipment filter */}
+        {allEquipment.length > 0 && (
+          <div className="mb-2 shrink-0">
+            <p className="text-secondary-text text-xs mb-1.5">Equipment</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {allEquipment.map(eq => (
+                <button
+                  key={eq}
+                  onClick={() => setPickerEquipment(pickerEquipment === eq ? null : eq)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium ${pickerEquipment === eq ? 'bg-orange-500 text-white' : 'bg-border text-secondary-text'}`}
+                >
+                  {eq}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Body part filter */}
+        {allMuscleOptions.length > 0 && (
+          <div className="mb-3 shrink-0">
+            <p className="text-secondary-text text-xs mb-1.5">Body part</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {allMuscleOptions.map(m => (
+                <button
+                  key={m}
+                  onClick={() => setPickerMuscle(pickerMuscle === m ? null : m)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium ${pickerMuscle === m ? 'bg-orange-500 text-white' : workedMuscles.includes(m) ? 'bg-success/10 text-success' : 'bg-border text-secondary-text'}`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="overflow-y-auto flex flex-col gap-2">
+          {allExercises === null && (
+            <p className="text-secondary-text text-sm text-center py-6">Loading exercises...</p>
+          )}
+          {allExercises !== null && pickerFiltered.length === 0 && (
+            <p className="text-secondary-text text-sm text-center py-6">No exercises match your filters.</p>
+          )}
+          {pickerFiltered.map(e => (
+            <button
+              key={e.id}
+              onClick={() => !addingExercise && addExercise(e)}
+              disabled={addingExercise}
+              className="flex items-center justify-between p-3 rounded-xl border border-border bg-background text-left active:scale-[0.98] transition-transform disabled:opacity-60"
+            >
+              <div>
+                <p className="text-white text-sm font-medium">{e.name}</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {e.muscle_groups.map(m => (
+                    <span key={m} className={`text-xs px-1.5 py-0.5 rounded-full ${workedMuscles.includes(m) ? 'bg-success/10 text-success' : 'bg-primary/15 text-primary'}`}>{m}</span>
+                  ))}
+                  <span className="text-secondary-text text-xs">· {e.equipment}</span>
+                </div>
+              </div>
+              {addingExercise ? (
+                <span className="text-secondary-text text-xs shrink-0 ml-3">Adding...</span>
+              ) : (
+                <span className="text-rose-400 text-xl shrink-0 ml-3">+</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
+  // Empty state — no exercises yet
+  if (!cur) {
+    return (
+      <div className="px-4 pt-8 pb-32">
+        {header}
+
+        <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+          <div className="w-16 h-16 bg-rose-600/15 rounded-2xl flex items-center justify-center mb-5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-rose-400">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </div>
+          <h2 className="text-white font-semibold text-xl mb-2">No exercises yet</h2>
+          <p className="text-secondary-text text-sm mb-8 leading-relaxed">
+            Add your first exercise to get started. Pick anything — you can keep adding as you go.
+          </p>
+          <button
+            onClick={openPicker}
+            className="bg-rose-600 text-white font-semibold px-8 py-3.5 rounded-2xl active:scale-[0.98] transition-transform"
+          >
+            + Add exercise
+          </button>
+        </div>
+
+        {picker}
+
+        {/* Finish modal */}
+        {showFinishModal && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setShowFinishModal(false)}>
+            <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
+              <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
+              <h2 className="text-xl font-bold text-white mb-2">End workout?</h2>
+              <p className="text-secondary-text text-sm mb-8">No exercises recorded — your session will still be saved.</p>
+              <div className="flex flex-col gap-3">
+                <button onClick={handleFinishTap} className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all">
+                  Yes, finish
+                </button>
+                <button onClick={() => setShowFinishModal(false)} className="w-full bg-border active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all">
+                  Keep going
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const isBodyweight = cur.equipment === 'Bodyweight' || cur.equipment === 'Resistance Band'
+
+  return (
+    <div className="px-4 pt-8 pb-32">
+      {header}
 
       <h1 className="text-3xl font-bold text-white mb-1">{cur.name}</h1>
       <div className="flex flex-wrap gap-1.5 mb-2">
@@ -245,41 +582,6 @@ export default function ActiveWorkoutPage() {
           <span key={m} className="bg-primary/15 text-primary text-xs px-2 py-0.5 rounded-full">{m}</span>
         ))}
       </div>
-      {cur.tips && (() => {
-        const [setup, technique, feel] = cur.tips.split('\n')
-        return (
-          <div className="bg-card border border-border rounded-xl p-4 mb-5 flex flex-col gap-3">
-            {setup && (
-              <div>
-                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">Setup</p>
-                <p className="text-secondary-text text-xs leading-relaxed">{setup}</p>
-              </div>
-            )}
-            {technique && (
-              <div>
-                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">Technique</p>
-                <p className="text-secondary-text text-xs leading-relaxed">{technique}</p>
-              </div>
-            )}
-            {feel && (
-              <div>
-                <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">Feel it</p>
-                <p className="text-secondary-text text-xs leading-relaxed">{feel}</p>
-              </div>
-            )}
-            {cur.videoUrl && (
-              <a
-                href={cur.videoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary text-xs font-medium underline underline-offset-2 mt-1"
-              >
-                Watch technique video →
-              </a>
-            )}
-          </div>
-        )
-      })()}
 
       {/* Sticky collapsible tips */}
       {cur.tips && (() => {
@@ -298,6 +600,11 @@ export default function ActiveWorkoutPage() {
                 {setup && <p className="text-secondary-text text-xs leading-relaxed"><span className="text-success font-semibold">Setup: </span>{setup}</p>}
                 {technique && <p className="text-secondary-text text-xs leading-relaxed"><span className="text-success font-semibold">Technique: </span>{technique}</p>}
                 {feel && <p className="text-secondary-text text-xs leading-relaxed"><span className="text-success font-semibold">Feel it: </span>{feel}</p>}
+                {cur.videoUrl && (
+                  <a href={cur.videoUrl} target="_blank" rel="noopener noreferrer" className="text-primary text-xs font-medium underline underline-offset-2 mt-1">
+                    Watch technique video →
+                  </a>
+                )}
               </div>
             )}
           </div>
@@ -364,7 +671,7 @@ export default function ActiveWorkoutPage() {
         + Add set
       </button>
 
-      {/* Complete Exercise — always visible */}
+      {/* Complete Exercise */}
       <div className="fixed bottom-20 left-0 right-0 px-4">
         <button
           onClick={() => setShowRatingModal(true)}
@@ -373,6 +680,33 @@ export default function ActiveWorkoutPage() {
           Complete Exercise
         </button>
       </div>
+
+      {picker}
+
+      {/* Next-options overlay — shown after completing the last exercise */}
+      {showNextOptions && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-end">
+          <div className="bg-card w-full rounded-t-3xl p-6 pb-12">
+            <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
+            <p className="text-success text-xs font-semibold uppercase tracking-wide text-center mb-1">Exercise done</p>
+            <h2 className="text-2xl font-bold text-white text-center mb-8">What's next?</h2>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => { setShowNextOptions(false); openPicker() }}
+                className="w-full bg-rose-600 active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
+              >
+                + Add another exercise
+              </button>
+              <button
+                onClick={() => { setShowNextOptions(false); finishWorkout() }}
+                className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all"
+              >
+                Finish workout
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rating modal */}
       {showRatingModal && (
@@ -404,7 +738,7 @@ export default function ActiveWorkoutPage() {
             <div className="w-10 h-1 bg-border rounded-full mx-auto mb-6" />
             <h2 className="text-xl font-bold text-white mb-2">End workout?</h2>
             <p className="text-secondary-text text-sm mb-8">
-              {cur.rated ? 'Your progress will be saved.' : 'You\'ll rate the current exercise first, then finish.'}
+              {cur.rated ? 'Your progress will be saved.' : "You'll rate the current exercise first, then finish."}
             </p>
             <div className="flex flex-col gap-3">
               <button onClick={handleFinishTap} className="w-full bg-success active:scale-95 text-white font-semibold py-4 rounded-2xl text-lg transition-all">
