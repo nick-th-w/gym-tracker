@@ -82,11 +82,35 @@ export default function ActiveWorkoutPage() {
       }
 
       const exerciseIds = wes.map(we => we.exercise_id)
+      const weIds = wes.map(we => we.id)
 
-      const [{ data: pastWEs }, { data: allRatings }] = await Promise.all([
+      const [
+        { data: pastWEs },
+        { data: allRatings },
+        { data: thisWorkoutFeedback },
+        { data: existingSets },
+      ] = await Promise.all([
         supabase.from('workout_exercises').select('id, exercise_id, workout_id').in('exercise_id', exerciseIds).neq('workout_id', workoutId).order('created_at', { ascending: false }).limit(100),
         supabase.from('exercise_feedback').select('exercise_id, rating').in('exercise_id', exerciseIds).order('created_at', { ascending: false }),
+        // Which exercises are already rated in THIS workout
+        supabase.from('exercise_feedback').select('exercise_id').eq('workout_id', workoutId),
+        // Sets already logged for THIS workout's exercises
+        supabase.from('sets').select('workout_exercise_id, set_number, weight_kg, reps, completed').in('workout_exercise_id', weIds).order('set_number'),
       ])
+
+      const ratedExerciseIds = new Set((thisWorkoutFeedback ?? []).map(r => r.exercise_id))
+
+      const existingSetsByWeId: Record<string, SetLog[]> = {}
+      for (const s of existingSets ?? []) {
+        if (s.weight_kg != null && s.reps != null) {
+          (existingSetsByWeId[s.workout_exercise_id] ??= []).push({
+            set_number: s.set_number,
+            weight_kg: s.weight_kg,
+            reps: s.reps,
+            completed: s.completed ?? false,
+          })
+        }
+      }
 
       const pastWorkoutIds = [...new Set((pastWEs ?? []).map(we => we.workout_id))]
       const { data: doneWkts } = pastWorkoutIds.length
@@ -99,9 +123,9 @@ export default function ActiveWorkoutPage() {
         if (!lastWEId[we.exercise_id] && doneIds.has(we.workout_id)) lastWEId[we.exercise_id] = we.id
       }
 
-      const weIds = Object.values(lastWEId)
-      const { data: priorSetsAll } = weIds.length
-        ? await supabase.from('sets').select('workout_exercise_id, set_number, weight_kg, reps').in('workout_exercise_id', weIds).eq('completed', true).order('set_number')
+      const priorWeIds = Object.values(lastWEId)
+      const { data: priorSetsAll } = priorWeIds.length
+        ? await supabase.from('sets').select('workout_exercise_id, set_number, weight_kg, reps').in('workout_exercise_id', priorWeIds).eq('completed', true).order('set_number')
         : { data: null }
 
       const priorByWE: Record<string, PriorSet[]> = {}
@@ -115,13 +139,15 @@ export default function ActiveWorkoutPage() {
         if (!(r.exercise_id in lastRating)) lastRating[r.exercise_id] = r.rating
       }
 
-      setSessions(wes.map(we => {
+      const builtSessions: Session[] = wes.map(we => {
         const ex = we.exercises as any
         const goalType = (we.goal_type ?? 'hypertrophy') as GoalType
         const repsMin = we.target_reps_min ?? 8
         const repsMax = we.target_reps_max ?? 10
         const priorSets = priorByWE[lastWEId[we.exercise_id]] ?? []
         const rec = getRecommendation(priorSets, lastRating[we.exercise_id] ?? null, repsMin, repsMax, goalType, ex?.name, loadedProfile)
+        const rated = ratedExerciseIds.has(we.exercise_id)
+        const savedSets = existingSetsByWeId[we.id]
 
         return {
           weId: we.id, exerciseId: we.exercise_id,
@@ -130,12 +156,21 @@ export default function ActiveWorkoutPage() {
           targetSets: we.target_sets ?? 3, targetRepsMin: repsMin, targetRepsMax: repsMax,
           goalType, repsUnit: we.reps_unit ?? 'reps',
           priorSets, recWeight: rec.weight_kg, recNote: rec.note,
-          sets: Array.from({ length: we.target_sets ?? 3 }, (_, i) => ({
-            set_number: i + 1, weight_kg: rec.weight_kg, reps: repsMin, completed: false,
-          })),
-          rated: false,
+          sets: savedSets?.length
+            ? savedSets
+            : Array.from({ length: we.target_sets ?? 3 }, (_, i) => ({
+                set_number: i + 1, weight_kg: rec.weight_kg, reps: repsMin, completed: false,
+              })),
+          rated,
         }
-      }))
+      })
+
+      setSessions(builtSessions)
+
+      // Resume at first unrated exercise, or stay at last if all done
+      const firstUnrated = builtSessions.findIndex(s => !s.rated)
+      setIdx(firstUnrated === -1 ? builtSessions.length - 1 : firstUnrated)
+
       setLoading(false)
     }
     load()
@@ -182,7 +217,6 @@ export default function ActiveWorkoutPage() {
 
     if (!we) { setAddingExercise(false); return }
 
-    // Fetch prior sets for this exercise
     const { data: pastWEs } = await supabase
       .from('workout_exercises')
       .select('id, workout_id')
@@ -270,10 +304,30 @@ export default function ActiveWorkoutPage() {
     }))
   }
 
-  function toggleSet(si: number) {
+  async function toggleSet(si: number) {
+    const session = sessions[idx]
+    const set = session.sets[si]
+    const nowCompleted = !set.completed
+
     setSessions(prev => prev.map((s, i) => i !== idx ? s : {
-      ...s, sets: s.sets.map((set, j) => j !== si ? set : { ...set, completed: !set.completed }),
+      ...s, sets: s.sets.map((set, j) => j !== si ? set : { ...set, completed: nowCompleted }),
     }))
+
+    const supabase = createClient()
+    if (nowCompleted) {
+      await supabase.from('sets').upsert({
+        workout_exercise_id: session.weId,
+        set_number: set.set_number,
+        weight_kg: set.weight_kg,
+        reps: set.reps,
+        completed: true,
+      }, { onConflict: 'workout_exercise_id,set_number' })
+    } else {
+      await supabase.from('sets')
+        .delete()
+        .eq('workout_exercise_id', session.weId)
+        .eq('set_number', set.set_number)
+    }
   }
 
   function addSet() {
@@ -290,10 +344,13 @@ export default function ActiveWorkoutPage() {
 
     await Promise.all([
       completedSets.length > 0
-        ? supabase.from('sets').insert(completedSets.map(set => ({
-            workout_exercise_id: s.weId, set_number: set.set_number,
-            weight_kg: set.weight_kg, reps: set.reps, completed: true,
-          })))
+        ? supabase.from('sets').upsert(
+            completedSets.map(set => ({
+              workout_exercise_id: s.weId, set_number: set.set_number,
+              weight_kg: set.weight_kg, reps: set.reps, completed: true,
+            })),
+            { onConflict: 'workout_exercise_id,set_number' }
+          )
         : Promise.resolve(),
       supabase.from('exercise_feedback').insert({
         exercise_id: s.exerciseId, workout_id: workoutId, rating,
@@ -310,7 +367,6 @@ export default function ActiveWorkoutPage() {
     } else if (idx < sessions.length - 1) {
       setIdx(i => i + 1)
     } else {
-      // Last (or only) exercise just rated — show next-options screen
       setShowNextOptions(true)
     }
   }
@@ -326,7 +382,6 @@ export default function ActiveWorkoutPage() {
   }
 
   function handleFinishTap() {
-    // If no exercises or current is already rated, finish immediately
     if (sessions.length === 0 || cur?.rated) {
       finishWorkout()
       return
@@ -348,7 +403,6 @@ export default function ActiveWorkoutPage() {
     )
   }
 
-  // Shared header (timer, progress circles, finish link, add button, muscles strip)
   const header = (
     <div className="mb-6">
       <div className="flex items-center justify-between mb-2">
@@ -396,14 +450,12 @@ export default function ActiveWorkoutPage() {
     </div>
   )
 
-  // Picker bottom sheet
   const picker = pickerOpen && (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setPickerOpen(false)}>
       <div className="bg-card w-full rounded-t-3xl p-5 pb-10 max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4 shrink-0" />
         <h2 className="text-lg font-bold text-white mb-3 shrink-0">Add exercise</h2>
 
-        {/* Muscle suggestions */}
         {workedMuscles.length > 0 && unworkedMuscles.length > 0 && (
           <div className="mb-3 shrink-0">
             <p className="text-secondary-text text-xs mb-1.5">Not yet worked</p>
@@ -451,7 +503,6 @@ export default function ActiveWorkoutPage() {
           ))}
         </div>
 
-        {/* Equipment filter */}
         {allEquipment.length > 0 && (
           <div className="mb-2 shrink-0">
             <p className="text-secondary-text text-xs mb-1.5">Equipment</p>
@@ -469,7 +520,6 @@ export default function ActiveWorkoutPage() {
           </div>
         )}
 
-        {/* Body part filter */}
         {allMuscleOptions.length > 0 && (
           <div className="mb-3 shrink-0">
             <p className="text-secondary-text text-xs mb-1.5">Body part</p>
@@ -522,7 +572,6 @@ export default function ActiveWorkoutPage() {
     </div>
   )
 
-  // Empty state — no exercises yet
   if (!cur) {
     return (
       <div className="px-4 pt-8 pb-32">
@@ -548,7 +597,6 @@ export default function ActiveWorkoutPage() {
 
         {picker}
 
-        {/* Finish modal */}
         {showFinishModal && (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setShowFinishModal(false)}>
             <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>
@@ -583,7 +631,6 @@ export default function ActiveWorkoutPage() {
         ))}
       </div>
 
-      {/* Sticky collapsible tips */}
       {cur.tips && (() => {
         const [setup, technique, feel] = cur.tips.split('\n')
         return (
@@ -671,7 +718,6 @@ export default function ActiveWorkoutPage() {
         + Add set
       </button>
 
-      {/* Complete Exercise */}
       <div className="fixed bottom-20 left-0 right-0 px-4">
         <button
           onClick={() => setShowRatingModal(true)}
@@ -683,7 +729,6 @@ export default function ActiveWorkoutPage() {
 
       {picker}
 
-      {/* Next-options overlay — shown after completing the last exercise */}
       {showNextOptions && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-end">
           <div className="bg-card w-full rounded-t-3xl p-6 pb-12">
@@ -708,7 +753,6 @@ export default function ActiveWorkoutPage() {
         </div>
       )}
 
-      {/* Rating modal */}
       {showRatingModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end">
           <div className="bg-card w-full rounded-t-3xl p-6 pb-10">
@@ -731,7 +775,6 @@ export default function ActiveWorkoutPage() {
         </div>
       )}
 
-      {/* Finish confirmation modal */}
       {showFinishModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end" onClick={() => setShowFinishModal(false)}>
           <div className="bg-card w-full rounded-t-3xl p-6 pb-10" onClick={e => e.stopPropagation()}>

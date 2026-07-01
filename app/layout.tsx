@@ -6,6 +6,7 @@ import './globals.css'
 import BottomNav from '@/components/BottomNav'
 import Background from '@/components/Background'
 import SessionCountBadge from '@/components/SessionCountBadge'
+import ResumePill from '@/components/ResumePill'
 import { createClient } from '@/lib/supabase/server'
 
 const gabarito = Gabarito({
@@ -44,10 +45,13 @@ export default async function RootLayout({
               {user?.user_metadata?.display_name ?? 'The Grind'}
             </span>
           </Link>
-          {/* Loads asynchronously — does not block page render */}
-          <Suspense fallback={null}>
-            <SessionCountBadge />
-          </Suspense>
+          <div className="flex items-center gap-2">
+            <ResumePill />
+            {/* Loads asynchronously — does not block page render */}
+            <Suspense fallback={null}>
+              <SessionCountBadge />
+            </Suspense>
+          </div>
         </header>
 
         <main className="pt-11 pb-20 min-h-screen">
