@@ -50,6 +50,19 @@ function fmtDate(dateStr: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
+function fmtDateFull(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function daysAgo(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const then = new Date(y, m - 1, d).getTime()
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  return Math.floor((now.getTime() - then) / 86400000)
+}
+
 function LineChart({ data }: { data: { label: string; value: number }[] }) {
   if (data.length < 2) return (
     <div className="h-28 flex items-center justify-center">
@@ -162,6 +175,7 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
   // Exercise chart data
   let chartData: { label: string; value: number }[] = []
   let allTimeBest: { weight: number; reps: number; rm: number } | null = null
+  let allTimeBestDate: string | null = null
 
   if (activeExerciseId) {
     const rmByDate: Record<string, { rm: number; weight: number; reps: number }> = {}
@@ -178,6 +192,10 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, d]) => ({ label: fmtDate(date), value: Math.round(d.rm) }))
     allTimeBest = pbByExercise[activeExerciseId] ?? null
+    if (allTimeBest && Object.keys(rmByDate).length > 0) {
+      allTimeBestDate = Object.entries(rmByDate).reduce((best, [date, d]) =>
+        d.rm > rmByDate[best].rm ? date : best, Object.keys(rmByDate)[0])
+    }
   }
 
   const hasAnyData = Object.keys(lastCompletedByExercise).length > 0
@@ -200,8 +218,8 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
       <h1 className="text-3xl font-bold text-white mb-1">Progress</h1>
       <p className="text-secondary-text text-sm mb-5">Track your lifts over time</p>
 
-      {/* Body part filter — all green */}
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
+      {/* Body part filter */}
+      <div className="flex gap-2 overflow-x-auto pb-2 mb-2 scrollbar-hide">
         <Link
           href={buildHref({ muscle: null })}
           className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${!activeMuscle ? 'bg-success text-white' : 'bg-card text-secondary-text border border-border'}`}
@@ -217,6 +235,10 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
             {m}
           </Link>
         ))}
+      </div>
+
+      {/* Favourites filter */}
+      <div className="flex gap-2 mb-3">
         <Link
           href={buildHref({ favourite: !showFavourites })}
           className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ${showFavourites ? 'bg-primary text-white' : 'bg-card text-secondary-text border border-border'}`}
@@ -225,9 +247,9 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
         </Link>
       </div>
 
-      {/* Exercise dropdown */}
+      {/* Exercise dropdown — only exercises with at least one completed set */}
       <ExerciseSelect
-        exercises={filteredExercises.map(e => ({ id: e.id, name: e.name }))}
+        exercises={filteredExercises.filter(e => lastCompletedByExercise[e.id]).map(e => ({ id: e.id, name: e.name }))}
         activeId={activeExerciseId}
         activeMuscle={activeMuscle}
       />
@@ -264,6 +286,11 @@ export default async function ProgressPage({ searchParams }: { searchParams?: { 
               <p className="text-success text-xs font-semibold uppercase tracking-wide mb-1">All-time best</p>
               <p className="text-white font-bold text-2xl">{allTimeBest.weight}kg × {allTimeBest.reps}</p>
               <p className="text-secondary-text text-xs mt-1">Est. 1RM: {Math.round(allTimeBest.rm)}kg</p>
+              {allTimeBestDate && (
+                <p className="text-secondary-text text-xs mt-0.5">
+                  {fmtDateFull(allTimeBestDate)} · {daysAgo(allTimeBestDate) === 0 ? 'today' : `${daysAgo(allTimeBestDate)} days ago`}
+                </p>
+              )}
             </div>
           )}
           <div className="bg-card border border-border rounded-xl p-4 mb-4">
